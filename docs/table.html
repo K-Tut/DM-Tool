@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Battlemap</title>
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="dm.css">
+<style>
+  html, body { height: 100%; overflow: hidden; background: #1a1714; }
+  #tbar { position: fixed; top: 0; left: 0; right: 0; z-index: 20; display: flex; gap: 6px; align-items: center; padding: 6px 10px; background: rgba(20,16,12,.85); color: #eee; }
+  #tbar b { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #tbar button { padding: 6px 12px; }
+  #board { position: fixed; top: 46px; left: 0; right: 0; bottom: 0; overflow: auto; border: none; border-radius: 0; max-height: none; }
+  #status { font-size: 12px; white-space: nowrap; }
+  #wait { color: #ddd; text-align: center; padding: 80px 20px; font-size: 18px; }
+</style>
+</head>
+<body>
+<div id="tbar"><b id="tname">Battlemap</b><span id="status">connecting…</span><button class="ghost" id="zout" style="color:#fff">−</button><button class="ghost" id="zfit" style="color:#fff">Fit</button><button class="ghost" id="zin" style="color:#fff">+</button></div>
+<div id="board" class="mapbox"><div id="wait">Waiting for the DM to share a map…</div></div>
+<script>
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch])); }
+</script>
+<script src="mapview.js"></script>
+<script src="table.js"></script>
+</body>
+</html>

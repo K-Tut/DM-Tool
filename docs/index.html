@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D&amp;D DM Tool</title>
+<link rel="icon" href="icon-192.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#8e1f1f">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="dm.css">
+</head>
+<body>
+<header id="topbar">
+  <a class="brand" href="#" data-act="home">🐉 <span class="bname">DM Tool</span> <small>scenarios · maps · monsters</small></a>
+  <nav id="topnav"></nav>
+  <span id="syncchip"></span>
+  <button class="ghost" data-act="theme" title="Toggle dark mode">☾</button>
+</header>
+<main id="main"></main>
+<div id="modal" class="modal-bg hidden"><div class="modal" id="modal-box"></div></div>
+<div id="toast" class="toast hidden"></div>
+<div id="dicebox" class="dice-bg hidden"></div>
+<div id="diceres" class="dice-res hidden"></div>
+<button id="dicefab" class="hidden" title="Dice"></button>
+<div id="dicetray" class="hidden"></div>
+<script src="config.js"></script>
+<script src="qr.js"></script>
+<script src="mapview.js"></script>
+<script src="names.js"></script>
+<script src="dmstore.js"></script>
+<script src="dm.js"></script>
+<script src="dice.js"></script>
+</body>
+</html>
