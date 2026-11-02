@@ -50,6 +50,12 @@ const Store = {
     await DDB.set("world", clone(w));
     if (touch) { Folder.pushWorld(w); Sync.soon(); }
   },
+  async getItems() { return (await DDB.get("items")) || { list: [], blocks: {}, trinkets: [] }; },
+  async setItems(m, fromRemote) {
+    m._updated = fromRemote ? (m._updated || Date.now()) : Date.now();
+    await DDB.set("items", m);
+    if (!fromRemote) Sync.soon();
+  },
   async getMon() { return (await DDB.get("monsters")) || { list: [], blocks: {} }; },
   async setMon(m, fromRemote) {
     m._updated = fromRemote ? (m._updated || Date.now()) : Date.now();
@@ -99,6 +105,12 @@ const Folder = {
       if (!st.running) {
         const rm = await (await fetch("api/monsters", { cache: "no-store" })).json();
         if ((rm.list || []).length && rm.imported && rm.imported !== lm?.imported) { await Store.setMon(rm, false); await loadMonsters(); n++; }
+      }
+      // magic item library imported on this laptop
+      const ist = await (await fetch("api/items/import", { cache: "no-store" })).json();
+      if (!ist.running) {
+        const ri = await (await fetch("api/items", { cache: "no-store" })).json(), li = await DDB.get("items");
+        if (((ri.list || []).length || (ri.trinkets || []).length) && ri.imported && ri.imported !== li?.imported) { await Store.setItems(ri, false); await loadItems(); n++; }
       }
     } catch (e) { console.warn("folder sync", e); }
     return n;
@@ -185,6 +197,10 @@ const Sync = {
       const lm = await DDB.get("monsters"), rmf = rmap["dm_monsters.json"];
       if (rmf && ru(rmf) > (lm?._updated || 0)) { this.setStatus("syncing", "Downloading monsters…"); const m = await this.download(rmf.id); m._updated = ru(rmf); await Store.setMon(m, true); await loadMonsters(); changes++; }
       else if (lm && (lm.list || []).length && (lm._updated || 0) > ru(rmf)) { this.setStatus("syncing", "Uploading monsters…"); await this.upload("dm_monsters.json", lm, lm._updated, rmf?.id); }
+      // --- magic item library ---
+      const li = await DDB.get("items"), rif = rmap["dm_items.json"];
+      if (rif && ru(rif) > (li?._updated || 0)) { this.setStatus("syncing", "Downloading magic items…"); const m = await this.download(rif.id); m._updated = ru(rif); await Store.setItems(m, true); await loadItems(); changes++; }
+      else if (li && ((li.list || []).length || (li.trinkets || []).length) && (li._updated || 0) > ru(rif)) { this.setStatus("syncing", "Uploading magic items…"); await this.upload("dm_items.json", li, li._updated, rif?.id); }
       // --- world map ---
       const lw = await DDB.get("world"), rwf = rmap["dm_world.json"];
       if (rwf && ru(rwf) > (lw?.updated || 0)) { const w = await this.download(rwf.id); w.updated = ru(rwf); await DDB.set("world", w); Folder.pushWorld(w); changes++; worldChanged = true; }

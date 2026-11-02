@@ -1,0 +1,5 @@
+# your own data stays on your laptop, never on GitHub
+scenarios/
+data/
+__pycache__/
+*.pyc

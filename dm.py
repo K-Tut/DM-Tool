@@ -25,15 +25,47 @@ PORT = 8766
 SCEN.mkdir(exist_ok=True)
 DATA.mkdir(exist_ok=True)
 
+def spell_sources():
+    """Where the Character Builder's wiki.json may be (next to this folder, or copied into data/)."""
+    out = [DATA / "wiki.json"]
+    for parent in (ROOT.parent, ROOT.parent.parent):
+        for name in ("dnd-builder", "Character-Builder", "character-builder", "dnd-builder-main"):
+            out.append(parent / name / "data" / "wiki.json")
+    return out
+
+
 import_state = {"running": False, "done": 0, "total": 0, "msg": "", "error": None}
 
 # ---------------- live table session (shared battlemap) ----------------
-table = {"active": False, "rev": 0, "imageRev": 0, "image": "", "name": "", "grid": {}, "tokens": [], "scenarioId": "", "mapId": "", "w": 0, "h": 0}
+table = {"active": False, "rev": 0, "imageRev": 0, "image": "", "name": "", "grid": {}, "tokens": [], "templates": [], "scenarioId": "", "mapId": "", "w": 0, "h": 0}
+players = {}   # pid -> {pid, name, color, img, seen}
+offers = []    # loot / items the DM hands out: [{id, kind, to, title, items, coins, claims, shares, oks, members, done}]
+
+
+def online_players():
+    now = time.time()
+    return [{k: p[k] for k in ("pid", "name", "color", "img")} for p in players.values() if now - p.get("seen", 0) < 75]
+
+
+def all_players():
+    now = time.time()
+    return [dict({k: p[k] for k in ("pid", "name", "color", "img")}, online=now - p.get("seen", 0) < 75) for p in players.values()]
+
+
+def offer_view(o, dm):
+    """Players never see a curse before the item is identified."""
+    if dm:
+        return o
+    o = dict(o)
+    o["items"] = [dict(it, curse="") if it.get("cursed") and not it.get("identified") else it for it in o.get("items", [])]
+    return o
 cond = threading.Condition()
 
 
 def table_view(dm, img_rev):
-    t = {k: table[k] for k in ("active", "rev", "imageRev", "name", "grid", "scenarioId", "mapId", "w", "h")}
+    t = {k: table[k] for k in ("active", "rev", "imageRev", "name", "grid", "templates", "scenarioId", "mapId", "w", "h")}
+    t["players"] = all_players()
+    t["offers"] = [offer_view(o, dm) for o in offers if not o.get("closed")]
     t["tokens"] = table["tokens"] if dm else [x for x in table["tokens"] if not x.get("hidden")]
     if img_rev != "skip" and str(img_rev) != str(table["imageRev"]):
         t["image"] = table["image"]
@@ -100,6 +132,25 @@ def run_import(include_2014, refresh, images=False):
         import_state["running"] = False
 
 
+item_state = {"running": False, "done": 0, "total": 0, "msg": "", "error": None}
+
+
+def run_item_import(include_2014, refresh):
+    item_state.update(running=True, done=0, total=0, msg="Starting...", error=None)
+    try:
+        import item_importer
+
+        def prog(done, total, msg):
+            item_state.update(done=done, total=total, msg=msg)
+        item_importer.run(include_2014=include_2014, refresh=refresh, progress=prog)
+    except ModuleNotFoundError as e:
+        item_state["error"] = f"Missing Python package: {e.name}. Run:  pip install requests beautifulsoup4"
+    except Exception as e:
+        item_state["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        item_state["running"] = False
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -159,6 +210,22 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_bytes(f.read_bytes() if f.exists() else b'{"list":[],"blocks":{}}', "application/json; charset=utf-8")
         if path == "/api/monsters/import":
             return self.send_json(import_state)
+        if path == "/api/items":
+            f = DATA / "items.json"
+            return self.send_bytes(f.read_bytes() if f.exists() else b'{"list":[],"blocks":{},"trinkets":[]}', "application/json; charset=utf-8")
+        if path == "/api/spells":                # spells from the Character Builder's rules text (wiki.json) on this laptop
+            for f in spell_sources():
+                if f.exists():
+                    try:
+                        w = json.loads(f.read_text(encoding="utf-8"))
+                        sp = w.get("spells") or {}
+                        lst = list(sp.values()) if isinstance(sp, dict) else sp
+                        return self.send_json({"source": str(f), "imported": w.get("imported", ""), "list": lst})
+                    except Exception as e:
+                        return self.send_json({"error": f"{f}: {e}", "list": []})
+            return self.send_json({"list": [], "error": "wiki.json not found. Put the DM Tool folder next to the dnd-builder folder, or copy dnd-builder/data/wiki.json into the DM Tool's data folder."})
+        if path == "/api/items/import":
+            return self.send_json(item_state)
         if path == "/api/mimg":                 # monster image: cached file, downloaded on first use
             key = q.get("k", [""])[0]
             e = monster_entry(key)
@@ -188,6 +255,9 @@ class Handler(BaseHTTPRequestHandler):
             dm = q.get("dm", ["0"])[0] == "1"
             since = int(q.get("rev", ["-1"])[0] or -1)
             img = q.get("img", [""])[0]
+            pid = q.get("pid", [""])[0]
+            if pid in players:
+                players[pid]["seen"] = time.time()
             with cond:
                 end = time.time() + 20
                 while table["rev"] <= since and time.time() < end:
@@ -225,6 +295,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path == "/api/items/import":
+            b = self.body()
+            if not item_state["running"]:
+                threading.Thread(target=run_item_import, args=(bool(b.get("include2014")), bool(b.get("refresh"))), daemon=True).start()
+            return self.send_json({"ok": True})
         if path == "/api/monsters/import":
             b = self.body()
             if not import_state["running"]:
@@ -236,7 +311,7 @@ class Handler(BaseHTTPRequestHandler):
                 if b.get("image") is not None and b.get("image") != table["image"]:
                     table["image"] = b["image"]
                     table["imageRev"] += 1
-                for k in ("name", "grid", "tokens", "scenarioId", "mapId", "w", "h"):
+                for k in ("name", "grid", "tokens", "templates", "scenarioId", "mapId", "w", "h"):
                     if k in b:
                         table[k] = b[k]
                 table["active"] = True
@@ -245,7 +320,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/table/update":        # DM changed tokens/grid
             b = self.body()
             with cond:
-                for k in ("name", "grid", "tokens"):
+                for k in ("name", "grid", "tokens", "templates"):
                     if k in b:
                         table[k] = b[k]
                 bump()
@@ -258,6 +333,63 @@ class Handler(BaseHTTPRequestHandler):
                         t["x"], t["y"] = int(b.get("x", t.get("x", 0))), int(b.get("y", t.get("y", 0)))
                 bump()
             return self.send_json({"ok": True, "rev": table["rev"]})
+        if path == "/api/player/join":         # a player opens the table page (name, colour, picture)
+            b = self.body()
+            pid = str(b.get("pid", ""))[:40]
+            if not pid:
+                return self.send_json({"error": "no id"}, 400)
+            with cond:
+                players[pid] = {"pid": pid, "name": str(b.get("name", "Player"))[:40], "color": str(b.get("color", "#2f7d4a"))[:10],
+                                "img": str(b.get("img", ""))[:20000], "seen": time.time()}
+                bump()
+            return self.send_json({"ok": True})
+        if path == "/api/offer/new":           # DM gives loot to the party or an item to one player
+            b = self.body()
+            with cond:
+                o = b.get("offer") or {}
+                o.setdefault("claims", {}); o.setdefault("oks", {}); o.setdefault("shares", None)
+                o["members"] = [o["to"]] if o.get("kind") == "player" and o.get("to") else [p["pid"] for p in online_players()]
+                if o.get("kind") == "player":
+                    o["claims"] = {it["id"]: o["to"] for it in o.get("items", [])}
+                o["done"] = False
+                offers.append(o)
+                bump()
+            return self.send_json({"ok": True})
+        if path == "/api/offer/act":           # claim / unclaim / ok / split coins / identify / close
+            b = self.body()
+            with cond:
+                o = next((x for x in offers if x.get("id") == b.get("oid")), None)
+                if not o:
+                    return self.send_json({"error": "no offer"}, 404)
+                pid, act, item = b.get("pid", ""), b.get("act"), b.get("item")
+                if pid and pid not in o["members"] and o.get("kind") != "player":
+                    o["members"].append(pid)
+                if act == "claim" and not o["done"]:
+                    if o["claims"].get(item) == pid:
+                        o["claims"].pop(item, None)
+                    else:
+                        o["claims"][item] = pid
+                    o["oks"] = {}
+                elif act == "split" and not o["done"]:
+                    m = [x for x in o["members"]]
+                    if m:
+                        coins = o.get("coins") or {}
+                        o["shares"] = {p: {c: int(coins.get(c, 0)) // len(m) for c in coins} for p in m}
+                        o["leftover"] = {c: int(coins.get(c, 0)) % len(m) for c in coins if int(coins.get(c, 0)) % len(m)}
+                    o["oks"] = {}
+                elif act == "ok" and not o["done"]:
+                    o["oks"][pid] = not o["oks"].get(pid)
+                    if all(o["oks"].get(p) for p in o["members"]):
+                        o["done"] = True
+                elif act == "identify":
+                    for it in o.get("items", []):
+                        if it.get("id") == item:
+                            it["identified"] = True
+                            it["identifiedBy"] = pid
+                elif act == "close":
+                    o["closed"] = True
+                bump()
+            return self.send_json({"ok": True})
         if path == "/api/table/stop":
             with cond:
                 table["active"] = False

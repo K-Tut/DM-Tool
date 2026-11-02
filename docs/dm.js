@@ -1,6 +1,6 @@
 "use strict";
 /* ================= D&D DM Tool ================= */
-const S = { view: "home", scen: null, list: [], tab: "overview", mapId: null, mon: { list: [], blocks: {} }, ui: {}, modal: null, diceAlways: true };
+const S = { mimg: {}, spells: { list: [] }, view: "home", scen: null, list: [], tab: "overview", mapId: null, mon: { list: [], blocks: {} }, items: { list: [], blocks: {}, trinkets: [], byKey: {} }, ui: {}, modal: null, diceAlways: true };
 const ACT = {}, CHG = {};
 
 // ---------- helpers (also used by dice.js) ----------
@@ -16,11 +16,23 @@ function getPath(o, p) { return p.split(".").reduce((a, k) => a == null ? a : a[
 function setPath(o, p, v) { const ks = p.split("."); let cur = o; for (let i = 0; i < ks.length - 1; i++) { if (cur[ks[i]] == null) cur[ks[i]] = {}; cur = cur[ks[i]]; } cur[ks[ks.length - 1]] = v; }
 function para(t) { return String(t || "").split("\n").map(l => l.trim()).filter(Boolean).map(l => `<p style="margin:0 0 5px">${esc(l)}</p>`).join(""); }
 function sbLinks(html, title) {
-  html = html.replace(/(^|[^\w])(\d+)d(\d+)(?:\s*([+−-])\s*(\d+)(?![\w]))?/g, (m, pre, n, s, sg, fl) => {
+  html = html.replace(/(^|[^\w])(\d+)d(\d+)(?:\s*([+−-])\s*(\d+)(?![\w]))?/g, (m, pre, n, s, sg, fl, off, all) => {
     const f = `${n}d${s}${sg ? (sg === "+" ? "+" : "-") + fl : ""}`;
-    return `${pre}<a href="#" class="dicelink" data-act="roll" data-k="dmg" data-f="${f}" data-t="${esc(title)}">🎲${n}d${s}${sg ? ` ${sg} ${fl}` : ""}</a>`;
+    const after = all.slice(off + m.length, off + m.length + 40).match(/^\)?\s+(\w+)\s+damage/i);
+    const dt = after && typeof DMG_TYPES !== "undefined" && DMG_TYPES.some(t => t.toLowerCase() === after[1].toLowerCase()) ? after[1].toLowerCase() : "";
+    return `${pre}<a href="#" class="dicelink" data-act="roll" data-k="dmg" data-f="${f}" data-dt="${dt}" data-t="${esc(title)}">🎲${n}d${s}${sg ? ` ${sg} ${fl}` : ""}</a>`;
   });
   return html.replace(/(Attack Roll:\s*|^|[\s(])([+−-]\d+)(\s*to hit)?/g, (m, pre, mod, th) => (/Attack Roll/.test(pre) || th) ? `${pre}<a href="#" class="dicelink" data-act="roll" data-k="d20" data-m="${mod.replace("−", "-")}" data-t="${esc(title)} attack">🎲${mod}</a>${th || ""}` : m);
+}
+// "Hit: 13 (2d6 + 6) Slashing damage plus 3 (1d6) Fire damage" -> [{f:"2d6+6",type:"slashing"},{f:"1d6",type:"fire"}]
+function dmgParts(t) {
+  const out = [], rx = /\((\d+d\d+(?:\s*[+−–-]\s*\d+)?)\)\s*([A-Za-z]+)?/g; let m;
+  while ((m = rx.exec(t))) {
+    if (out.length && !/plus\s+\d*\s*$/i.test(t.slice(Math.max(0, m.index - 12), m.index)) && !/\band\s+\d*\s*$/i.test(t.slice(Math.max(0, m.index - 10), m.index))) continue;
+    const ty = (m[2] || "").toLowerCase();
+    out.push({ f: m[1].replace(/\s/g, "").replace(/[−–]/g, "-"), type: DMG_TYPES.some(x => x.toLowerCase() === ty) ? ty : "" });
+  }
+  return out;
 }
 function inp(path, v, o = {}) { const t = o.type || (typeof v === "number" ? "number" : "text"); return `<input type="${t}" data-path="${path}" ${t === "number" ? "data-num" : ""} value="${esc(v ?? "")}" placeholder="${esc(o.ph || "")}" style="${o.style || ""}" ${o.attr || ""}>`; }
 function sel(path, v, options, o = {}) { const opts = options.map(x => Array.isArray(x) ? x : [x, x]); return `<select data-path="${path}" ${o.attr || ""}>${o.blank !== undefined ? `<option value="">${esc(o.blank)}</option>` : ""}${opts.map(([k, l]) => `<option value="${esc(k)}" ${String(k) === String(v ?? "") ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`; }
@@ -45,7 +57,7 @@ const doc = () => isWorld() ? S.world : S.scen;          // the object the map, 
 const types = () => isWorld() ? WORLD_TYPES : NODE_TYPES;
 const SIZE_CELLS = { tiny: 1, small: 1, medium: 1, large: 2, huge: 3, gargantuan: 4 };
 const TOKEN_COLORS = ["#1f4e8e", "#2f7d4a", "#6b2f8e", "#c27c0e", "#0f8a8a", "#8e1f1f", "#444444", "#b03a8a"];
-function newScenario(name) { return { id: "s" + Date.now().toString(36), name: name || "New scenario", subtitle: "", synopsis: "", created: Date.now(), updated: Date.now(), map: null, nodes: [], battlemaps: [], monsters: [], npcs: [], secrets: [], notes: "", party: { size: 4, level: 3 } }; }
+function newScenario(name) { return { id: "s" + Date.now().toString(36), name: name || "New scenario", subtitle: "", synopsis: "", created: Date.now(), updated: Date.now(), map: null, nodes: [], battlemaps: [], monsters: [], npcs: [], secrets: [], notes: "", party: { size: 4, level: 3 }, blocks: [] }; }
 // ----- encounter difficulty (DMG 2014 XP thresholds, as used by donjon's 5e encounter calculator) -----
 const XP_BY_CR = { "0": 10, "1/8": 25, "1/4": 50, "1/2": 100, "1": 200, "2": 450, "3": 700, "4": 1100, "5": 1800, "6": 2300, "7": 2900, "8": 3900, "9": 5000, "10": 5900, "11": 7200, "12": 8400, "13": 10000, "14": 11500, "15": 13000,
   "16": 15000, "17": 18000, "18": 20000, "19": 22000, "20": 25000, "21": 33000, "22": 41000, "23": 50000, "24": 62000, "25": 75000, "26": 90000, "27": 105000, "28": 120000, "29": 135000, "30": 155000 };
@@ -75,17 +87,30 @@ function diffBadge(d, long) {
   return `<span class="chip" style="background:${c};color:#fff" title="${d.base} XP × ${d.mult} = ${d.adj} adjusted XP · party thresholds easy ${d.t[0]} / medium ${d.t[1]} / hard ${d.t[2]} / deadly ${d.t[3]}">⚔ ${l}${long ? ` · ${d.base} XP (adj. ${d.adj})` : ""}${d.unknown ? " ?" : ""}</span>`;
 }
 // NPC names (and aliases) in text become links
+// NPC names (and aliases) and the scenario's monsters (also in plural: "4 bullywugs") in text become links
 function npcLinks(html) {
-  const npcs = (S.scen?.npcs || []).flatMap(n => [n.name, ...String(n.aliases || "").split(",")].map(x => x.trim()).filter(x => x.length > 1).map(x => [x, n.id]));
-  if (!npcs.length) return html;
-  npcs.sort((a, b) => b[0].length - a[0].length);
-  const map = {}; npcs.forEach(([k, id]) => map[k.toLowerCase()] ||= id);
-  const rx = new RegExp("\\b(" + npcs.map(([k]) => esc(k).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")\\b", "gi");
-  return html.split(/(<[^>]+>)/).map(part => part.startsWith("<") ? part : part.replace(rx, m => `<a href="#" class="npclink" data-act="npcPeek" data-id="${map[m.toLowerCase()]}">${m}</a>`)).join("");
+  const names = (S.scen?.npcs || []).flatMap(n => [n.name, ...String(n.aliases || "").split(",")].map(x => x.trim()).filter(x => x.length > 1).map(x => [x, "npc", n.id]))
+    .concat((S.scen?.monsters || []).map(m => [monName(m).trim(), "mon", m.id]).filter(x => x[0].length > 2));
+  if (!names.length) return html;
+  names.sort((a, b) => b[0].length - a[0].length);
+  const map = {}; names.forEach(([k, t, id]) => map[k.toLowerCase()] ||= [t, id]);
+  const rx = new RegExp("\\b(" + names.map(([k]) => esc(k).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")((?:e?s)?)\\b", "gi");
+  let inLink = 0;
+  return html.split(/(<[^>]+>)/).map(part => {
+    if (part.startsWith("<")) { if (/^<a[\s>]/i.test(part)) inLink++; else if (/^<\/a>/i.test(part)) inLink = Math.max(0, inLink - 1); return part; }
+    if (inLink) return part;
+    return part.replace(rx, (m, base, pl) => { const [t, id] = map[base.toLowerCase()] || []; if (!t) return m;
+      return t === "npc" ? `<a href="#" class="npclink" data-act="npcPeek" data-id="${id}">${m}</a>` : `<a href="#" class="monlink" data-act="monPeek" data-id="${id}">${m}</a>`; });
+  }).join("");
 }
 function richText(t) { return npcLinks(para(t)); }
 function migrateScen(sc) {
-  sc.npcs ||= []; sc.secrets ||= []; sc.party ||= { size: 4, level: 3 };
+  sc.npcs ||= []; sc.secrets ||= []; sc.loot ||= []; sc.party ||= { size: 4, level: 3 };
+  if (!sc.blocks) {   // older scenarios had one overview map -> first map block
+    sc.blocks = [];
+    if (sc.map) { const id = "m" + uid(); sc.blocks.push({ id, type: "map", title: "Overview map", map: sc.map, thumb: sc.thumb || "" }); sc.nodes.forEach(nd => nd.map ||= id); }
+    delete sc.map;
+  }
   sc.nodes.forEach(nd => { nd.monsters = (nd.monsters || []).map(x => typeof x === "string" ? { id: x, n: (sc.monsters.find(m => m.id === x)?.count) || 1 } : x); });
   return sc;
 }
@@ -102,7 +127,8 @@ function save() {
   if (isWorld()) { if (!S.world) return; pendingWorld = S.world; clearTimeout(saveW); saveW = setTimeout(flushSave, 500); return; }
   if (!S.scen) return; S.scen.updated = Date.now();
   const sc = S.scen;
-  sc.summary = `${sc.nodes.length} nodes · ${sc.battlemaps.length} battlemaps · ${sc.monsters.length} monsters`;
+  const maps = mapBlocks(sc); if (maps[0]?.thumb) sc.thumb = maps[0].thumb; else if (!maps.some(b => b.map)) sc.thumb = "";
+  sc.summary = `${maps.length > 1 ? maps.length + " maps · " : ""}${sc.nodes.length} nodes · ${sc.battlemaps.length} battlemaps · ${sc.monsters.length} monsters`;
   pendingScen = sc; clearTimeout(saveT); saveT = setTimeout(flushSave, 500);
 }
 async function flushSave() {
@@ -113,12 +139,33 @@ async function flushSave() {
 }
 async function loadList() { S.list = await Store.list(); }
 async function loadWorld() { S.world = await Store.getWorld(); }
+async function loadItems() {
+  S.items = await Store.getItems(); S.items.byKey = {};
+  (S.items.list || []).forEach(m => S.items.byKey[m.slug + "|" + m.ed] = m);
+}
 async function loadMonsters() {
   S.mon = await Store.getMon(); S.mon.byKey = {};
   (S.mon.list || []).forEach(m => S.mon.byKey[monKey(m)] = m);
   SB_CACHE.clear();
 }
-function monImgSrc(sm) { const e = monEntry(sm); if (!e?.img) return ""; return S.server ? "api/mimg?k=" + encodeURIComponent(sm.ref) : e.img; }
+function monImgRef(sm) { return sm.ref || sm.custom?.imgRef || ""; }
+function monImgSrc(sm) { const ref = monImgRef(sm); if (S.mimg[ref]) return S.mimg[ref]; const e = ref ? S.mon.byKey[ref] : null; if (!e?.img) return ""; return S.server ? "api/mimg?k=" + encodeURIComponent(ref) : e.img; }
+// images of the monsters used in the scenarios, small JPEGs, so the backup file carries them to the phone
+async function collectMonImages(scs) {
+  const refs = new Set(); scs.forEach(sc => (sc?.monsters || []).forEach(m => { const r = monImgRef(m); if (r) refs.add(r); }));
+  const out = {};
+  for (const r of refs) {
+    if (S.mimg[r]) { out[r] = S.mimg[r]; continue; }
+    const e = S.mon.byKey[r]; if (!e?.img) continue;
+    try { const url = S.server ? "api/mimg?k=" + encodeURIComponent(r) : e.img; const res = await fetch(url, S.server ? {} : { referrerPolicy: "no-referrer" }); if (!res.ok) continue;
+      const bmp = await createImageBitmap(await res.blob()); const k = Math.min(1, 520 / Math.max(bmp.width, bmp.height));
+      const cv = document.createElement("canvas"); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+      const cx = cv.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(bmp, 0, 0, cv.width, cv.height);
+      out[r] = S.mimg[r] = cv.toDataURL("image/jpeg", 0.8); } catch (x) { }
+  }
+  if (Object.keys(out).length) DDB.set("mimg", S.mimg).catch(() => { });
+  return out;
+}
 
 // ---------- render ----------
 function render() { keepScroll(renderInner); }
@@ -128,18 +175,21 @@ function renderInner() {
   $("#main").innerHTML = S.view === "home" ? vHome() : vScenario();
   renderModal();
   if (typeof Dice !== "undefined") Dice.sync();
+  if (typeof drawPanel === "function") drawPanel();
   afterRender();
 }
 function renderModal() {
   const bg = $("#modal"), box = $("#modal-box");
   if (!S.modal) { bg.classList.add("hidden"); return; }
   bg.classList.remove("hidden");
-  keepScroll(() => { box.innerHTML = { qr: mQR, custom: mCustom, npc: mNpc }[S.modal.type](); });
+  keepScroll(() => { box.innerHTML = ({ qr: mQR, custom: mCustom, npc: mNpc, item: mItem, mon: mMon, ...(window.MODALS || {}) })[S.modal.type](); });
 }
 // map views need real sizes -> set up after DOM is there
 function afterRender() {
-  const ov = $("#ovmap");   if (ov && doc()?.map) { if (S.ui.ovZ == null) S.ui.ovZ = MapView.fitZoom(ov, doc().map); drawOverview(); }
+  S.ui.z ||= {};
+  document.querySelectorAll(".ovmap").forEach(host => { const b = mapBlock(host.dataset.map); if (!b?.map) return; if (S.ui.z[b.id] == null) S.ui.z[b.id] = MapView.fitZoom(host, b.map); drawOverview(b.id); });
   const bm = $("#bmmap"); const m = curMap(); if (bm && m) { if (S.ui.bmZ == null) S.ui.bmZ = MapView.fitZoom(bm, m); drawBattlemap(); }
+  if (document.getElementById("cbmap") && typeof drawCbMap === "function") drawCbMap();
 }
 
 // ---------- HOME ----------
@@ -156,6 +206,8 @@ function vHome() {
         : `<div class="row"><button data-act="impMon">${n ? "Update" : "Import"} monsters from aidedd.org</button><label class="small"><input type="checkbox" id="imp2014"> also older 2014 monsters (slower)</label><label class="small"><input type="checkbox" id="impImg"> download all images now (for offline use; otherwise they load when first opened)</label></div>`)
         : `<p class="small muted">The import runs on the laptop (DM Tool started with start-dm). From there the monsters come to this device via <b>Google Drive sync</b>, or load a <code>monsters.json</code> file with <b>⤒ Import</b> at the top.</p>`}
       ${imp.error ? `<p class="warn">${esc(imp.error)}</p>` : ""}</div>
+    ${vItemsCard()}
+    ${spellsCard()}
     ${vSyncCard()}
     ${S.server ? `<div class="card"><h3>Playing without internet</h3><p class="small">Turn on your laptop's <b>mobile hotspot</b> (Windows: Settings → Network &amp; internet → Mobile hotspot) and let players join it — no internet needed. Then open a battlemap and press <b>📡 Share with players</b>: they scan the QR code. If Windows asks about the firewall for Python, allow <b>private networks</b>.</p></div>` : ""}
     <p class="small muted" style="text-align:center">DM Tool ${APP_VERSION} · ${S.server ? "running on this laptop" : "app on this device"}</p>`;
@@ -171,10 +223,10 @@ function vSyncCard() {
 }
 
 // ---------- SCENARIO ----------
-const TABS = [["overview", "🗺 Overview & nodes"], ["maps", "⚔ Battlemaps"], ["monsters", "👹 Monsters"], ["npcs", "🙂 NPCs"], ["notes", "📜 Secrets & notes"]];
+const TABS = [["overview", "🗺 Overview & nodes"], ["combat", "⚔ Combat"], ["maps", "▦ Battlemaps"], ["monsters", "👹 Monsters"], ["npcs", "🙂 NPCs"], ["loot", "💰 Loot"], ["notes", "📜 Secrets & notes"]];
 function vScenario() {
   const sc = S.scen;
-  const body = { overview: vNodeMap, maps: vMaps, monsters: vMonsters, npcs: vNpcs, notes: vNotes }[S.tab]();
+  const body = { overview: vOverview, combat: vCombat, maps: vMaps, monsters: vMonsters, npcs: vNpcs, loot: vLoot, notes: vNotes }[S.tab]();
   return `<div class="card"><div class="row">${inp("name", sc.name, { style: "font-size:20px;font-weight:800;flex:1;min-width:200px" })}
       <button class="ghost" data-act="exportScen">⤓ Export</button><button class="ghost danger" data-act="delScen" style="color:#fff">🗑</button></div>
       <div style="margin-top:6px">${inp("subtitle", sc.subtitle || "", { ph: "Subtitle: one or two sentences about the adventure (shown on the start page)", style: "width:100%;font-style:italic" })}</div>
@@ -185,21 +237,63 @@ function vScenario() {
     <div class="dmtabs">${TABS.map(([k, l]) => `<button class="${S.tab === k ? "on" : ""}" data-act="tab" data-k="${k}">${l}</button>`).join("")}</div>${body}`;
 }
 
-// ----- overview: dungeon map + nodes -----
-function vNodeMap() {
-  const sc = doc(), w = isWorld();
-  const nodes = sc.nodes.slice().sort((a, b) => a.n - b.n);
-  const lk = w ? "wList" : "nList", listOpen = S.ui[lk] !== false;
-  let h = `<div class="card">`;
-  if (!sc.map) h += w ? `<p>Add a map of your world. Then click on it to place numbered nodes (cities, dungeons, regions…) and link them to your scenarios.</p><button data-act="setOvMap">🖼 Add world map image</button>`
-    : `<p>Add the overview map of your dungeon, town or region. Then click on it to place numbered nodes (rooms, traps, secrets…).</p><button data-act="setOvMap">🖼 Add map image</button>`;
-  else h += `<div class="row" style="margin-bottom:8px"><button class="${S.ui.placing ? "" : "ghost"}" data-act="togglePlace">${S.ui.placing ? "✔ Click the map to place nodes (click here to stop)" : "➕ Place nodes"}</button>
-      <button class="ghost small" data-act="ovZoom" data-d="0.8">−</button><button class="ghost small" data-act="ovZoom" data-d="fit">Fit</button><button class="ghost small" data-act="ovZoom" data-d="1.25">+</button>
-      <button class="ghost small right" data-act="setOvMap">Replace image</button></div>
-    <div id="ovmap" class="mapbox ${S.ui.placing ? "placing" : ""}" data-sk="ov"></div><p class="small muted" style="margin:6px 0 0">Click a node to read it right there · drag a node to move it.</p>`;
-  h += `</div><div class="card nodelist"><h3 data-act="listTog" data-k="${lk}" style="cursor:pointer;margin:0">${listOpen ? "▾" : "▸"} Nodes (${nodes.length})</h3>
-    ${listOpen ? `<div style="margin-top:8px">${nodes.map(w ? worldNodeRow : nodeRow).join("") || '<p class="muted small">No nodes yet.</p>'}</div>` : ""}</div>`;
+// ----- overview: maps (with numbered nodes) and text blocks -----
+// a "map block" is {id, title, map:{image,w,h}}; the world map is a single block with id "world"
+function mapBlocks(d = doc()) { return d === S.world ? [{ id: "world", title: "", map: S.world.map, world: true }] : (d.blocks || []).filter(b => b.type === "map"); }
+function mapBlock(id) { return mapBlocks().find(b => b.id === id); }
+function nodeMapId(nd, d = doc()) { if (d === S.world) return "world"; const ms = mapBlocks(d); return ms.some(b => b.id === nd.map) ? nd.map : ms[0]?.id; }
+function nodesOf(bid) { const d = doc(); return d.nodes.filter(nd => nodeMapId(nd, d) === bid).sort((a, b) => a.n - b.n); }
+function mapSection(b) {
+  const w = isWorld(), nodes = nodesOf(b.id), listOpen = (S.ui.list || {})[b.id] !== false, placing = S.ui.placing === b.id;
+  let h = "";
+  if (!b.map) h += w ? `<p>Add a map of your world. Then click on it to place numbered nodes (cities, dungeons, regions…) and link them to your scenarios.</p><button data-act="setOvMap" data-map="${b.id}">🖼 Add world map image</button>`
+    : `<p>Add the map or image. Then click on it to place numbered nodes (rooms, traps, secrets…).</p><button data-act="setOvMap" data-map="${b.id}">🖼 Add image</button>`;
+  else h += `<div class="row" style="margin-bottom:8px"><button class="${placing ? "" : "ghost"}" data-act="togglePlace" data-map="${b.id}">${placing ? "✔ Click the map to place nodes (click here to stop)" : "➕ Place nodes"}</button>
+      <button class="${S.ui.moving === b.id ? "" : "ghost"}" data-act="toggleMove" data-map="${b.id}" title="Drag nodes to new places">${S.ui.moving === b.id ? "✔ Drag nodes to move them (click to stop)" : "✥ Move nodes"}</button>
+      <button class="ghost small" data-act="ovZoom" data-map="${b.id}" data-d="0.8">−</button><button class="ghost small" data-act="ovZoom" data-map="${b.id}" data-d="fit" title="Fit the width">↔ Fit width</button><button class="ghost small" data-act="ovZoom" data-map="${b.id}" data-d="fith" title="Fit the height">↕ Fit height</button><button class="ghost small" data-act="ovZoom" data-map="${b.id}" data-d="1.25">+</button>
+      ${w ? "" : `<button class="${S.ui.bmons?.[b.id] ? "" : "ghost"} small" data-act="blockMons" data-id="${b.id}">👹 Monsters (${(b.monsters || []).length})</button>`}
+      ${b.sketch ? `<button class="ghost small right" data-act="editDrawing" data-k="block" data-id="${b.id}">✏ Edit drawing</button>` : `<button class="ghost small right" data-act="setOvMap" data-map="${b.id}">Replace image</button>`}</div>
+    <div id="ovmap-${b.id}" class="mapbox ovmap ${placing ? "placing" : ""} ${S.ui.moving === b.id ? "moving" : ""}" data-map="${b.id}" data-sk="ov-${b.id}"></div><p class="small muted" style="margin:6px 0 0">Click a node to read or edit it right there${S.ui.moving === b.id ? " · drag nodes to move them" : " · switch on ✥ Move nodes to drag them"}.</p>`;
+  if (b.map || nodes.length) h += `<div class="nodelist"><h3 data-act="listTog" data-k="${b.id}" style="cursor:pointer;margin:12px 0 0">${listOpen ? "▾" : "▸"} Nodes (${nodes.length})</h3>
+    ${listOpen ? `<div style="margin-top:8px">${nodes.map(w ? worldNodeRow : nodeRow).join("") || '<p class="muted small">No nodes yet. Use ➕ Place nodes.</p>'}</div>` : ""}</div>`;
   return h;
+}
+function vNodeMap() {   // world map (start page)
+  return `<div class="card">${mapSection(mapBlocks()[0])}</div>`;
+}
+function insertBar(at) {
+  return `<div class="insbar"><button class="ghost small" data-act="addBlock" data-t="text" data-at="${at}">＋ Text block</button><button class="ghost small" data-act="addBlock" data-t="map" data-at="${at}">＋ Map / image</button><button class="ghost small" data-act="drawBlock" data-at="${at}">✏ Draw a map</button></div>`;
+}
+function vOverview() {
+  const sc = S.scen, bl = sc.blocks;
+  if (!bl.length) return `<div class="card"><p>Build the overview of your adventure from <b>maps or images</b> (each with its own numbered nodes) and <b>text blocks</b> in between — e.g. the dungeon map, a text about the approach, the town map, a handout image…</p>
+    <div class="row"><button data-act="addBlock" data-t="map" data-at="0">🖼 Add map / image</button><button class="ghost" data-act="drawBlock" data-at="0">✏ Draw a map</button><button class="ghost" data-act="addBlock" data-t="text" data-at="0">📝 Add text block</button></div></div>`;
+  return bl.map((b, i) => {
+    const tools = `<span class="right blocktools"><button class="ghost small" data-act="moveBlock" data-id="${b.id}" data-d="-1" ${i ? "" : "disabled"} title="Move up">↑</button><button class="ghost small" data-act="moveBlock" data-id="${b.id}" data-d="1" ${i < bl.length - 1 ? "" : "disabled"} title="Move down">↓</button><button class="ghost small" data-act="delBlock" data-id="${b.id}" title="Delete">🗑</button></span>`;
+    let body;
+    if (b.type === "text" && b.closed) body = `<div class="row blockhead"><button class="ghost small" data-act="blockFold" data-id="${b.id}">▸</button><div class="grow" data-act="blockFold" data-id="${b.id}" style="cursor:pointer"><b>📝 ${esc(b.title || "Text")}</b> <span class="npreview">${esc(String(b.text || "").replace(/\s+/g, " ").slice(0, 160))}</span></div>${tools}</div>`;
+    else if (b.type === "text") {
+      const editing = S.ui.editBlock === b.id || !b.text;
+      body = `<div class="row blockhead"><button class="ghost small" data-act="blockFold" data-id="${b.id}">▾</button>📝 ${inp(`blocks.${i}.title`, b.title || "", { ph: "Heading (optional)", style: "flex:1;font-weight:700" })}${tools}</div>
+        ${editing ? `<textarea data-live="blocks.${i}.text" style="min-height:140px;margin-top:8px" placeholder="Text: read-aloud, background, how the parts connect… NPC names become links.">${esc(b.text || "")}</textarea><div><button class="small ghost" data-act="editBlock" data-id="">✔ Done</button></div>`
+          : `<div class="desc readtext" style="margin-top:8px">${richText(b.text)}</div><div><button class="small ghost" data-act="editBlock" data-id="${b.id}">✎ Edit</button></div>`}`;
+    } else {
+      const fold = `<button class="ghost small" data-act="blockFold" data-id="${b.id}" title="${b.closed ? "Open" : "Close"} this section">${b.closed ? "▸" : "▾"}</button>`;
+      if (b.closed) body = `<div class="row blockhead">${fold}${b.thumb || b.map ? `<img class="bthumb" src="${b.thumb || b.map.image}" data-act="blockFold" data-id="${b.id}" alt="">` : ""}<div class="grow" data-act="blockFold" data-id="${b.id}" style="cursor:pointer"><b>🗺 ${esc(b.title || "Map")}</b>${b.notes ? `<div class="small muted">${esc(b.notes)}</div>` : ""}
+          <div class="small muted">${nodesOf(b.id).length} nodes${(b.monsters || []).length ? ` · 👹 ${(b.monsters || []).length} monsters` : ""}</div></div>${tools}</div>`;
+      else body = `<div class="row blockhead">${fold}🗺 ${inp(`blocks.${i}.title`, b.title || "", { ph: "Map title, e.g. Level 1", style: "flex:1;font-weight:700" })}${tools}</div>
+        <textarea class="bnotes" data-live="blocks.${i}.notes" rows="2" placeholder="Notes for this map (what's here, the mood, reminders…)">${esc(b.notes || "")}</textarea>
+        <div class="${S.ui.bmons?.[b.id] ? "mapwithmons" : ""}" style="margin-top:8px"><div class="mapcol">${mapSection(b)}</div>${S.ui.bmons?.[b.id] ? blockMonsters(b) : ""}</div>`;
+    }
+    return `<div class="card block ${b.type} ${b.closed ? "closed" : ""}" id="block-${b.id}">${body}</div>${insertBar(i + 1)}`;
+  }).join("").replace(/^/, insertBar(0));
+}
+// small pictures on a node (pasted with Ctrl+V or picked from a file)
+function nodeImages(nd, edit) {
+  const im = nd.images || [];
+  if (!im.length && !edit) return "";
+  return `<div class="nimgs">${im.map((src, k) => `<span class="nimg"><img src="${src}" data-act="nodeImgView" data-id="${nd.id}" data-k="${k}" alt="">${edit ? `<a href="#" data-act="nodeImgDel" data-id="${nd.id}" data-k="${k}" title="Remove">✕</a>` : ""}</span>`).join("")}
+    ${edit ? `<button class="small ghost" data-act="nodeImgAdd" data-id="${nd.id}">🖼 Add image</button><span class="small muted">or copy an image and press Ctrl+V</span>` : ""}</div>`;
 }
 function nodeRow(nd) {
   const sc = S.scen, t = NODE_TYPES[nd.type] || NODE_TYPES.other, open = S.ui.openNode === nd.id, i = sc.nodes.indexOf(nd);
@@ -207,12 +301,14 @@ function nodeRow(nd) {
   const bm = sc.battlemaps.find(b => b.id === nd.battlemap);
   const npcsHere = (sc.npcs || []).filter(n => n.node === nd.id);
   const editing = S.ui.editNode === nd.id || !nd.text;
-  return `<div class="nrow" id="node-${nd.id}"><div class="nhead" data-act="openNode" data-id="${nd.id}"><span class="nbadge" style="background:${t[1]}">${nd.n}</span><b style="flex:1">${esc(nd.title || "Untitled")}</b>
-    <span class="chip">${t[2]} ${t[0]}</span>${enc.length ? `<span class="chip">👹 ${enc.reduce((a, x) => a + x.n, 0)}</span>` : ""}${diffBadge(d)}${npcsHere.length ? `<span class="chip">🙂 ${npcsHere.length}</span>` : ""}${bm ? `<span class="chip">⚔ map</span>` : ""}<span class="muted">${open ? "▾" : "▸"}</span></div>
+  return `<div class="nrow" id="node-${nd.id}"><div class="nhead" data-act="openNode" data-id="${nd.id}"><span class="nbadge" style="background:${t[1]}">${nd.n}</span><b class="ntitle">${esc(nd.title || "Untitled")}</b>${!open && nd.text ? `<span class="npreview">${esc(String(nd.text).replace(/\s+/g, " ").slice(0, 160))}</span>` : '<span class="grow"></span>'}
+    ${(nd.images || []).length ? `<span class="chip">🖼 ${nd.images.length}</span>` : ""}<span class="chip">${t[2]} ${t[0]}</span>${enc.length ? `<span class="chip">👹 ${enc.reduce((a, x) => a + x.n, 0)}</span>` : ""}${diffBadge(d)}${npcsHere.length ? `<span class="chip">🙂 ${npcsHere.length}</span>` : ""}${lootAt(nd.id).length ? `<span class="chip">💰 ${lootAt(nd.id).length}</span>` : ""}${bm ? `<span class="chip">⚔ map</span>` : ""}<span class="muted">${open ? "▾" : "▸"}</span></div>
     ${open ? `<div class="nbody">
       <div class="row">${inp(`nodes.${i}.title`, nd.title, { ph: "Title, e.g. Throne room", style: "flex:1" })}${sel(`nodes.${i}.type`, nd.type, Object.entries(NODE_TYPES).map(([k, v]) => [k, v[2] + " " + v[0]]))}</div>
       ${editing ? `<textarea data-live="nodes.${i}.text" placeholder="Read-aloud text, description, secrets, clues, trap details… NPC names become links." style="min-height:120px">${esc(nd.text || "")}</textarea><div><button class="small ghost" data-act="editNode" data-id="">✔ Done</button></div>`
         : `<div class="desc readtext">${richText(nd.text)}</div><div><button class="small ghost" data-act="editNode" data-id="${nd.id}">✎ Edit text</button></div>`}
+      ${nodeImages(nd, true)}
+      ${lootAt(nd.id).length ? `<div class="row small"><b>Loot here:</b>${lootAt(nd.id).map(L => `<a href="#" data-act="lootGo" data-id="${L.id}">💰 ${esc(L.name)}</a>`).join(", ")}</div>` : ""}
       ${npcsHere.length ? `<div class="row small"><b>NPCs here:</b>${npcsHere.map(n => `<a href="#" class="npclink" data-act="npcPeek" data-id="${n.id}">${esc(n.name)}</a>`).join(", ")}</div>` : ""}
       <div class="encbox"><div class="row small"><b>Encounter</b>${diffBadge(d, true)}<span class="muted">party: ${party().size} × level ${party().level}</span></div>
         ${enc.map(x => `<div class="encrow"><b style="flex:1">${esc(monName(x.sm))}</b><span class="small muted">CR ${esc(monCr(x.sm) || "?")} · ${monXp(x.sm)} XP</span>
@@ -226,8 +322,8 @@ function nodeRow(nd) {
 function worldNodeRow(nd) {
   const w = S.world, t = WORLD_TYPES[nd.type] || WORLD_TYPES.other, open = S.ui.openNode === nd.id, i = w.nodes.indexOf(nd);
   const scen = S.list.find(s => s.id === nd.scen), editing = S.ui.editNode === nd.id || !nd.text;
-  return `<div class="nrow" id="node-${nd.id}"><div class="nhead" data-act="openNode" data-id="${nd.id}"><span class="nbadge" style="background:${t[1]}">${nd.n}</span><b style="flex:1">${esc(nd.title || "Untitled")}</b>
-    <span class="chip">${t[2]} ${t[0]}</span>${scen ? `<span class="chip">📜 ${esc(scen.name)}</span>` : ""}<span class="muted">${open ? "▾" : "▸"}</span></div>
+  return `<div class="nrow" id="node-${nd.id}"><div class="nhead" data-act="openNode" data-id="${nd.id}"><span class="nbadge" style="background:${t[1]}">${nd.n}</span><b class="ntitle">${esc(nd.title || "Untitled")}</b>${!open && nd.text ? `<span class="npreview">${esc(String(nd.text).replace(/\s+/g, " ").slice(0, 160))}</span>` : '<span class="grow"></span>'}
+    ${(nd.images || []).length ? `<span class="chip">🖼 ${nd.images.length}</span>` : ""}<span class="chip">${t[2]} ${t[0]}</span>${scen ? `<span class="chip">📜 ${esc(scen.name)}</span>` : ""}<span class="muted">${open ? "▾" : "▸"}</span></div>
     ${open ? `<div class="nbody">
       <div class="row">${inp(`nodes.${i}.title`, nd.title, { ph: "Name, e.g. Ironhold", style: "flex:1" })}${sel(`nodes.${i}.type`, nd.type, Object.entries(WORLD_TYPES).map(([k, v]) => [k, v[2] + " " + v[0]]))}</div>
       ${editing ? `<textarea data-live="nodes.${i}.text" placeholder="Description, rulers, rumours, history…" style="min-height:120px">${esc(nd.text || "")}</textarea><div><button class="small ghost" data-act="editNode" data-id="">✔ Done</button></div>`
@@ -244,43 +340,65 @@ function nodePopup(nd) {
     const enc = encounterOf(nd), npcs = (S.scen.npcs || []).filter(n => n.node === nd.id), bm = S.scen.battlemaps.find(b => b.id === nd.battlemap);
     if (enc.length) extra += `<div class="small" style="margin-top:6px"><b>Encounter:</b> ${enc.map(x => x.n + "× " + esc(monName(x.sm))).join(", ")} ${diffBadge(difficulty(enc))}</div>`;
     if (npcs.length) extra += `<div class="small" style="margin-top:4px"><b>NPCs:</b> ${npcs.map(n => `<a href="#" class="npclink" data-act="npcPeek" data-id="${n.id}">${esc(n.name)}</a>`).join(", ")}</div>`;
+    const loot = lootAt(nd.id);
+    if (loot.length) extra += `<div class="small" style="margin-top:4px"><b>Loot:</b> ${loot.map(L => `<a href="#" data-act="lootGo" data-id="${L.id}">💰 ${esc(L.name)}</a> <span class="muted">(${(L.items || []).length} items, ≈ ${fmtGp(lootValue(L))})</span>`).join(", ")}</div>`;
     if (bm) extra += `<div style="margin-top:6px"><button class="small" data-act="openMap" data-id="${bm.id}">⚔ Open battlemap</button></div>`;
   }
   const cls = (nd.x > 0.6 ? " left" : "") + (nd.y > 0.55 ? " up" : "");
+  if (S.ui.popEditing === nd.id) {
+    const d = doc(), i = d.nodes.indexOf(nd), T = types();
+    return `<div class="npop editing${cls}" style="left:${nd.x * 100}%;top:${nd.y * 100}%"><div class="npop-h"><span class="nbadge" style="background:${t[1]}">${nd.n}</span>${inp(`nodes.${i}.title`, nd.title, { ph: "Title", style: "flex:1;min-width:0;font-weight:700" })}<a href="#" data-act="popClose" title="Close">✕</a></div>
+      <div class="npop-b" style="display:grid;gap:6px">${sel(`nodes.${i}.type`, nd.type, Object.entries(T).map(([k, v]) => [k, v[2] + " " + v[0]]))}
+        <textarea data-live="nodes.${i}.text" style="min-height:150px" placeholder="Description, read-aloud text, secrets, clues, trap…">${esc(nd.text || "")}</textarea>
+        ${nodeImages(nd, true)}
+        ${w ? `<label class="small">Scenario here ${sel(`nodes.${i}.scen`, nd.scen || "", S.list.map(x => [x.id, x.name]), { blank: "— none —" })}</label>` : ""}</div>
+      <div class="npop-f row"><button class="small" data-act="popDone">✔ Done</button><button class="small ghost" data-act="popEdit" data-id="${nd.id}">${w ? "Open in list" : "Encounter, battlemap… in list"}</button><button class="small ghost right" data-act="delNode" data-id="${nd.id}" title="Delete node">🗑</button></div></div>`;
+  }
   return `<div class="npop${cls}" style="left:${nd.x * 100}%;top:${nd.y * 100}%"><div class="npop-h"><span class="nbadge" style="background:${t[1]}">${nd.n}</span><b class="grow">${esc(nd.title || "Untitled")}</b><span class="chip">${t[2]} ${t[0]}</span><a href="#" data-act="popClose" title="Close">✕</a></div>
-    <div class="npop-b">${nd.text ? richText(nd.text) : '<span class="muted small">No description yet.</span>'}${extra}</div>
-    <div class="npop-f"><button class="small ghost" data-act="popEdit" data-id="${nd.id}">✎ Edit in list</button></div></div>`;
+    <div class="npop-b">${nodeImages(nd, false)}${nd.text ? richText(nd.text) : '<span class="muted small">No description yet.</span>'}${extra}</div>
+    <div class="npop-f row"><button class="small" data-act="popEditHere" data-id="${nd.id}">✎ Edit</button><button class="small ghost" data-act="popEdit" data-id="${nd.id}">Open in list</button></div></div>`;
 }
-function drawOverview() {
-  const host = $("#ovmap"), d = doc(), m = d.map, z = S.ui.ovZ, T = types();
-  const pop = d.nodes.find(nd => nd.id === S.ui.popNode);
+function drawOverview(bid) {
+  const host = document.getElementById("ovmap-" + bid), b = mapBlock(bid); if (!host || !b?.map) return;
+  const m = b.map, z = S.ui.z[bid], T = types(), nodes = nodesOf(bid);
+  const pop = nodes.find(nd => nd.id === S.ui.popNode);
   host.innerHTML = `<div class="mv-layer" style="width:${m.w * z}px;height:${m.h * z}px"><img src="${m.image}" draggable="false" alt="">
-    ${d.nodes.map(nd => { const t = T[nd.type] || T.other; return `<div class="node ${S.ui.popNode === nd.id || S.ui.openNode === nd.id ? "open" : ""}" data-node="${nd.id}" title="${esc(nd.title || "")}" style="left:${nd.x * 100}%;top:${nd.y * 100}%;background:${t[1]}">${nd.n}</div>`; }).join("")}
+    ${nodes.map(nd => { const t = T[nd.type] || T.other; return `<div class="node ${S.ui.popNode === nd.id || S.ui.openNode === nd.id ? "open" : ""}" data-node="${nd.id}" title="${esc(nd.title || "")}" style="left:${nd.x * 100}%;top:${nd.y * 100}%;background:${t[1]}">${nd.n}</div>`; }).join("")}
     ${pop ? nodePopup(pop) : ""}</div>`;
 }
+let nodeDragAt = 0;
+function togglePop(id) { S.ui.popEditing = null; S.ui.popNode = S.ui.popNode === id ? null : id; drawAllMaps(); }
+function drawAllMaps() { document.querySelectorAll(".ovmap").forEach(h => drawOverview(h.dataset.map)); }
 function bindOverview() {
   let drag = null;
   document.addEventListener("pointerdown", e => {
-    const host = e.target.closest("#ovmap"); if (!host || e.target.closest(".npop")) return;
-    const nodeEl = e.target.closest(".node");
-    if (nodeEl) { e.preventDefault(); nodeEl.setPointerCapture(e.pointerId); drag = { el: nodeEl, id: nodeEl.dataset.node, sx: e.clientX, sy: e.clientY, moved: false }; return; }
-    if (S.ui.placing && e.target.closest(".mv-layer")) {
+    const host = e.target.closest(".ovmap"); if (!host || e.target.closest(".npop")) return;
+    const bid = host.dataset.map, nodeEl = e.target.closest(".node");
+    if (nodeEl) { if (S.ui.moving !== bid) return;   // not in move mode: a tap opens the popup (click handler below), dragging scrolls the map
+      e.preventDefault(); nodeEl.setPointerCapture(e.pointerId); drag = { el: nodeEl, id: nodeEl.dataset.node, bid, layer: host.querySelector(".mv-layer"), sx: e.clientX, sy: e.clientY, moved: false }; return; }
+    if (S.ui.placing === bid && e.target.closest(".mv-layer")) {
       const r = host.querySelector(".mv-layer").getBoundingClientRect();
       const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
       const d = doc(), n = Math.max(0, ...d.nodes.map(k => k.n)) + 1;
-      const nd = isWorld() ? { id: uid(), n, x, y, title: "Place " + n, type: "city", text: "", scen: "" } : { id: uid(), n, x, y, title: "Node " + n, type: "room", text: "", monsters: [] };
-      d.nodes.push(nd); S.ui.openNode = nd.id; S.ui.popNode = null; save(); render();
+      const nd = isWorld() ? { id: uid(), n, x, y, title: "Place " + n, type: "city", text: "", scen: "" } : { id: uid(), n, x, y, map: bid, title: "Node " + n, type: "room", text: "", monsters: [] };
+      d.nodes.push(nd); S.ui.openNode = nd.id; S.ui.popNode = null; (S.ui.list ||= {})[bid] = true; save(); render();
     }
   });
   document.addEventListener("pointermove", e => {
     if (!drag) return; if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 4) drag.moved = true;
-    if (!drag.moved) return; const r = $("#ovmap .mv-layer").getBoundingClientRect();
+    if (!drag.moved) return; const r = drag.layer.getBoundingClientRect();
     drag.el.style.left = ((e.clientX - r.left) / r.width * 100) + "%"; drag.el.style.top = ((e.clientY - r.top) / r.height * 100) + "%";
   });
   document.addEventListener("pointerup", e => {
     if (!drag) return; const d = drag; drag = null; const nd = doc()?.nodes.find(k => k.id === d.id); if (!nd) return;
-    if (d.moved) { const r = $("#ovmap .mv-layer").getBoundingClientRect(); nd.x = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); nd.y = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)); save(); drawOverview(); }
-    else { S.ui.popNode = S.ui.popNode === nd.id ? null : nd.id; drawOverview(); }
+    if (d.moved) { const r = d.layer.getBoundingClientRect(); nd.x = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); nd.y = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)); save(); drawOverview(d.bid); }
+    else togglePop(nd.id);
+    nodeDragAt = Date.now();
+  });
+  document.addEventListener("click", e => {
+    const nodeEl = e.target.closest(".ovmap .node"); if (!nodeEl) return;
+    if (Date.now() - nodeDragAt < 400) return;   // already handled by the move-mode drag code
+    togglePop(nodeEl.dataset.node);
   });
 }
 
@@ -298,7 +416,7 @@ function freeCell(m, size, fromRight) {
 function curMap() { return S.scen && S.mapId ? S.scen.battlemaps.find(b => b.id === S.mapId) : null; }
 function vMaps() {
   const sc = S.scen, m = curMap();
-  if (!m) return `<div class="card"><div class="row"><h3 style="margin:0">Battlemaps</h3><button class="right" data-act="addMap">+ Add battlemap image</button></div></div>
+  if (!m) return `<div class="card"><div class="row"><h3 style="margin:0">Battlemaps</h3><button class="right" data-act="addMap">+ Add battlemap image</button><button class="ghost" data-act="drawMap">✏ Draw a battlemap</button></div></div>
     <div class="mapcards">${sc.battlemaps.map(b => { const linked = sc.nodes.filter(nd => nd.battlemap === b.id); return `<div class="card mapcard" data-act="openMap" data-id="${b.id}" style="cursor:pointer"><img src="${b.thumb || b.image}"><b>${esc(b.name)}</b>
       <div class="small muted">${b.grid.cols}×${b.grid.rows} grid · ${b.tokens.length} tokens${linked.length ? " · nodes " + linked.map(n => "#" + n.n).join(", ") : ""}</div>${S.live && S.live.mapId === b.id ? '<div class="small"><span class="livedot"></span>shared with players</div>' : ""}</div>`; }).join("") || '<p class="muted">No battlemaps yet.</p>'}</div>`;
   const i = sc.battlemaps.indexOf(m), g = m.grid, live = S.live && S.live.mapId === m.id;
@@ -309,10 +427,10 @@ function vMaps() {
       ${t.kind === "monster" ? `<button class="small ghost" data-act="tokHide" data-id="${t.id}" title="Hidden from players?">${t.hidden ? "🙈 hidden" : "👁 visible"}</button>
         <span class="small">HP <button class="small ghost" data-act="tokHp" data-id="${t.id}" data-d="-1">−</button><input type="number" data-path="battlemaps.${i}.tokens.${k}.hp" data-num value="${t.hp ?? ""}" style="width:52px">/${t.maxHp ?? "?"}<button class="small ghost" data-act="tokHp" data-id="${t.id}" data-d="1">+</button></span>` : ""}
       <a href="#" class="right" data-act="tokDel" data-id="${t.id}">✕</a></div>`; };
-  return `<div class="row" style="margin-bottom:8px"><button class="ghost" data-act="closeMap">← All battlemaps</button>${inp(`battlemaps.${i}.name`, m.name, { style: "font-weight:700;flex:1" })}
+  return `<div class="row" style="margin-bottom:8px"><button class="ghost" data-act="closeMap">← All battlemaps</button>${inp(`battlemaps.${i}.name`, m.name, { style: "font-weight:700;flex:1" })}${m.sketch ? `<button class="ghost" data-act="editDrawing" data-k="map" data-id="${m.id}">✏ Edit drawing</button>` : ""}
       ${!S.server ? `<span class="small muted" title="Sharing the map with players needs the DM Tool running on the laptop">📡 share: laptop only</span>` : live ? `<span><span class="livedot"></span><b>Live</b></span><button data-act="showQR">📱 QR code</button><button class="ghost" data-act="stopShare">■ Stop sharing</button>` : `<button data-act="share">📡 Share with players</button>`}</div>
     <div class="mapedit"><div><div class="row small" style="margin-bottom:6px"><button class="ghost small" data-act="bmZoom" data-d="0.8">−</button><button class="ghost small" data-act="bmZoom" data-d="fit">Fit</button><button class="ghost small" data-act="bmZoom" data-d="1.25">+</button>
-        <span class="muted">Drag tokens to move them (they snap to the grid).</span></div><div id="bmmap" class="mapbox" data-sk="bm"></div></div>
+        <span class="muted">Drag tokens to move them (they snap to the grid).</span></div>${mapTools("bm")}<div class="maphost">${trashHtml()}<div id="bmmap" class="mapbox" data-sk="bm"></div></div></div>
       <div><div class="card"><h3>Grid</h3>
         <div class="row small"><label>Cells across ${inp(`battlemaps.${i}.grid.cols`, +g.cols, { type: "number", style: "width:64px" })}</label><label>Cells down ${inp(`battlemaps.${i}.grid.rows`, +g.rows, { type: "number", style: "width:64px" })}</label>
           <button class="ghost small" data-act="squareRows">square cells</button></div>
@@ -333,7 +451,7 @@ function vMaps() {
 }
 function drawBattlemap() {
   const m = curMap(), host = $("#bmmap"); if (!m || !host) return;
-  host.innerHTML = MapView.html(m, S.ui.bmZ, { dm: true, sel: S.ui.selTok });
+  host.innerHTML = MapView.html(m, S.ui.bmZ, { dm: true, sel: S.ui.selTok, img: tokImg, tplEdit: true });
 }
 
 // live sharing (DM side)
@@ -341,7 +459,7 @@ async function pushTable(full) {
   if (!S.server) return;
   const m = curMap() || (S.live && S.scen.battlemaps.find(b => b.id === S.live.mapId)); if (!m || !S.live) return;
   if (S.live.mapId !== m.id) return;
-  const body = { name: m.name, grid: m.grid, tokens: m.tokens };
+  const body = { name: m.name, grid: m.grid, tokens: m.tokens.map(tokForTable), templates: m.templates || [] };
   if (full) Object.assign(body, { image: m.image, w: m.w, h: m.h, scenarioId: S.scen.id, mapId: m.id });
   await api(full ? "api/table/host" : "api/table/update", { method: "POST", body });
 }
@@ -351,6 +469,9 @@ async function dmPoll() {
     try {
       const s = await api(`api/table?dm=1&rev=${rev}&img=skip`);
       rev = s.rev;
+      const sig = JSON.stringify([s.players, s.offers]);
+      if (sig !== S.shareSig) { S.shareSig = sig; S.players = s.players || []; S.offers = s.offers || [];
+        if (S.view === "scen" && S.tab === "loot" && !document.querySelector("input:focus, textarea:focus, select:focus") && !S.modal) render(); }
       if (s.active && S.scen && s.scenarioId === S.scen.id) {
         S.live = { mapId: s.mapId };
         const m = S.scen.battlemaps.find(b => b.id === s.mapId);
@@ -369,7 +490,7 @@ function linkifyHtml(html, title) {
   const tpl = document.createElement("template"); tpl.innerHTML = html;
   const walker = document.createTreeWalker(tpl.content, NodeFilter.SHOW_TEXT); const nodes = [];
   while (walker.nextNode()) nodes.push(walker.currentNode);
-  nodes.forEach(n => { const out = sbLinks(esc(n.nodeValue), title); if (out !== esc(n.nodeValue)) { const span = document.createElement("span"); span.innerHTML = out; n.replaceWith(...span.childNodes); } });
+  nodes.forEach(n => { if (n.parentElement?.closest("a")) return; const out = sbLinks(esc(n.nodeValue), title); if (out !== esc(n.nodeValue)) { const span = document.createElement("span"); span.innerHTML = out; n.replaceWith(...span.childNodes); } });
   return tpl.innerHTML;
 }
 // ----- stat block clean-up: rebuild the AC/HP/Speed lines and the ability scores from the text,
@@ -391,10 +512,13 @@ function abParse(text) {
     while ((m = re14.exec(t))) { const k = m[1].toLowerCase(); out[k] ||= { s: m[2], mod: m[3].replace(/\s/g, "").replace(/[−–]/, "-") }; } }
   return AB_KEYS.every(k => out[k]) ? { ab: out, ed } : null;
 }
-function abHtml(p) {
-  const L = k => k.charAt(0).toUpperCase() + k.slice(1);
-  if (p.ed === "14") return `<div class="abil14">${AB_KEYS.map(k => `<div class="carac"><strong>${k.toUpperCase()}</strong><br>${p.ab[k].s} (${p.ab[k].mod})</div>`).join("")}</div>`;
-  const cell = k => `<th class="${k}">${L(k)}</th><td class="sc ${k}">${p.ab[k].s}</td><td class="md ${k}">${p.ab[k].mod}</td><td class="md ${k}">${p.ab[k].save}</td>`;
+const ABN = { str: "Strength", dex: "Dexterity", con: "Constitution", int: "Intelligence", wis: "Wisdom", cha: "Charisma" };
+const normMod = m => String(m).replace(/\s/g, "").replace(/[−–]/, "-");
+function rollLink(mod, t) { mod = normMod(mod); return `<a href="#" class="sbroll" data-act="roll" data-k="d20" data-m="${esc(mod)}" data-t="${esc(t)}" title="Roll ${esc(t)}">${esc(mod)}</a>`; }
+function abHtml(p, title = "") {
+  const L = k => k.charAt(0).toUpperCase() + k.slice(1), chk = k => `${title} — ${ABN[k]} check`, sv = k => `${title} — ${ABN[k]} save`;
+  if (p.ed === "14") return `<div class="abil14">${AB_KEYS.map(k => `<div class="carac"><strong>${k.toUpperCase()}</strong><br>${p.ab[k].s} (${rollLink(p.ab[k].mod, chk(k))})</div>`).join("")}</div>`;
+  const cell = k => `<th class="${k}">${L(k)}</th><td class="sc ${k}">${p.ab[k].s}</td><td class="md ${k}">${rollLink(p.ab[k].mod, chk(k))}</td><td class="md ${k}">${rollLink(p.ab[k].save, sv(k))}</td>`;
   // three small blocks (Str+Int, Dex+Wis, Con+Cha) side by side, wrapping on narrow screens
   return `<div class="abil24w">${[["str", "int"], ["dex", "wis"], ["con", "cha"]].map(([a, b]) => `<table class="abil24"><tr><th></th><th></th><th class="h">MOD</th><th class="h">SAVE</th></tr><tr>${cell(a)}</tr><tr>${cell(b)}</tr></table>`).join("")}</div>`;
 }
@@ -411,7 +535,7 @@ function headHtml(text) {
   const line = x => x ? `<strong>${esc(x.l)}</strong> ${esc(x.v)}` : "";
   return `<div class="sbhead"><p>${line(f.ac)}${f.init ? `<span class="sbinit">${line(f.init)}</span>` : ""}</p>${f.hp ? `<p>${line(f.hp)}</p>` : ""}${f.speed ? `<p>${line(f.speed)}</p>` : ""}${other.map(o => `<p>${esc(o)}</p>`).join("")}</div>`;
 }
-function fixStatBlock(root) {
+function fixStatBlock(root, title) {
   // 1) the smallest element that contains all six ability scores
   const cands = [...root.querySelectorAll("*")].filter(el => abParse(spacedText(el)));
   const C = cands.find(c => !cands.some(o => o !== c && c.contains(o)));
@@ -447,7 +571,7 @@ function fixStatBlock(root) {
   if (!newHead) r.setStartBefore(abStart);
   r.setEndAfter(abEnd);
   r.deleteContents();
-  tpl.innerHTML = newHead + abHtml(parsed) + "<hr>";
+  tpl.innerHTML = newHead + abHtml(parsed, title) + "<hr>";
   r.insertNode(tpl.content);
   // 3) tidy: no double rules, no empty leftovers
   root.querySelectorAll("hr").forEach(h => {   // next visible thing after a rule is another rule -> drop it
@@ -461,18 +585,63 @@ function fixStatBlock(root) {
   root.querySelectorAll("hr").forEach(h => { let n = h.nextSibling; while (n && ((n.nodeType === 3 && !n.nodeValue.trim()) || n.nodeName === "BR")) { const x = n.nextSibling; if (n.nodeName === "BR") n.remove(); n = x; } });
   [...root.querySelectorAll("div,span,p")].reverse().forEach(el => { if (!el.childNodes.length || (!el.textContent.trim() && !el.querySelector("img,hr,table,br"))) el.remove(); });
 }
+// clickable rolls: Saving Throws / Skills / Initiative lines, and attack names (to hit, then damage)
+const ABBR = { str: "str", dex: "dex", con: "con", int: "int", wis: "wis", cha: "cha", strength: "str", dexterity: "dex", constitution: "con", intelligence: "int", wisdom: "wis", charisma: "cha" };
+function sbEnhance(root, title) {
+  root.querySelectorAll("strong, b").forEach(st => {
+    if (st.closest("a")) return;
+    const label = st.textContent.trim().replace(/[:.]$/, "");
+    const kind = /^(Saving Throws|Saves)$/i.test(label) ? "save" : /^Skills$/i.test(label) ? "skill" : /^Initiative$/i.test(label) ? "init" : null;
+    if (!kind) return;
+    const texts = [];
+    for (let n = st.nextSibling; n && !(n.nodeType === 1 && /^(BR|STRONG|B|P|DIV|TABLE)$/.test(n.nodeName)); n = n.nextSibling) if (n.nodeType === 3) texts.push(n);
+    texts.forEach(n => {
+      const src = esc(n.nodeValue); let html;
+      if (kind === "init") html = src.replace(/([+−–-]\s?\d+)/, m => rollLink(m, `${title} — initiative`));
+      else html = src.replace(/([A-Z][A-Za-z]*(?: [A-Z][a-z]+)*)\s+([+−–-]\s?\d+)/g, (m, name, mod) => {
+        const ab = ABBR[name.toLowerCase()];
+        return `${name} ${rollLink(mod, `${title} — ${kind === "save" ? (ab ? ABN[ab] : name) + " save" : name}`)}`; });
+      if (html !== src) { const sp = document.createElement("span"); sp.innerHTML = html; n.replaceWith(...sp.childNodes); }
+    });
+  });
+  root.querySelectorAll("p").forEach(p => {
+    const nameEl = p.querySelector("strong, b"); if (!nameEl || nameEl.closest("a")) return;
+    const t = p.textContent.replace(/\s+/g, " ");
+    const hit = t.match(/(?:Attack Roll|Weapon Attack|Spell Attack)[^:]{0,20}:\s*([+−–-]\s?\d+)/i) || t.match(/([+−–-]\s?\d+)\s*to hit/i);
+    if (!hit) return;
+    const hi = t.search(/\bHit\s*:/);
+    const parts = hi >= 0 ? dmgParts(t.slice(hi)) : [];
+    const name = nameEl.textContent.trim().replace(/[.:]\s*$/, "");
+    const a = document.createElement("a"); a.href = "#"; a.className = "atklink"; a.dataset.act = "atk"; a.dataset.m = normMod(hit[1]); a.dataset.p = JSON.stringify(parts); a.dataset.t = `${title}: ${name}`;
+    a.title = `Roll ${name}: to hit ${normMod(hit[1])}${parts.length ? ", then damage " + parts.map(p => p.f + (p.type ? " " + p.type : "")).join(" + ") : ""}`;
+    nameEl.replaceWith(a); a.appendChild(nameEl);
+    // the "+5" after "Melee Attack Roll:" (it can sit in a different piece of text than the label)
+    const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT); let seen = "", done = false;
+    while (!done && walker.nextNode()) {
+      const n = walker.currentNode; if (n.parentElement.closest("a")) { seen += n.nodeValue; continue; }
+      const before = seen; seen += n.nodeValue;
+      const keyIn = /(Attack Roll|Weapon Attack|Spell Attack|Attack)\b[^:]{0,20}:?\s*$/i.test(before) || /(Attack Roll|Weapon Attack|Spell Attack)/i.test(before);
+      const m = n.nodeValue.match(/([+−–-]\s?\d+)(\s*to hit)?/);
+      if (!m || !(keyIn || m[2] || /(Attack Roll|Weapon Attack|Spell Attack)[^+−–-]*$/i.test(n.nodeValue.slice(0, m.index)))) continue;
+      const b = document.createElement("a"); b.href = "#"; b.className = "dicelink"; b.dataset.act = "atk"; b.dataset.m = a.dataset.m; b.dataset.p = a.dataset.p; b.dataset.t = a.dataset.t; b.title = a.title; b.textContent = "🎲" + normMod(m[1]);
+      const rest = n.splitText(m.index); rest.nodeValue = rest.nodeValue.slice(m[1].length); n.parentNode.insertBefore(b, rest); done = true;
+    }
+  });
+}
 const SB_CACHE = new Map();
-function prepStatHtml(html, title) {
-  const key = title + "\u0000" + html; if (SB_CACHE.has(key)) return SB_CACHE.get(key);
+function prepStatHtml(html, title, fix = true) {
+  const key = (fix ? "1" : "0") + title + "\u0000" + html; if (SB_CACHE.has(key)) return SB_CACHE.get(key);
   const tpl = document.createElement("template"); tpl.innerHTML = html;
   const wrap = document.createElement("div"); wrap.appendChild(tpl.content);
-  try { fixStatBlock(wrap); } catch (e) { console.warn("stat block clean-up failed", e); }
+  try { if (fix) fixStatBlock(wrap, title); } catch (e) { console.warn("stat block clean-up failed", e); }
+  try { sbEnhance(wrap, title); } catch (e) { console.warn("stat block rolls failed", e); }
   const out = linkifyHtml(wrap.innerHTML, title); SB_CACHE.set(key, out); return out;
 }
 function statBlock(sm) {
   const e = monEntry(sm), c = sm.custom || {};
   const name = monName(sm), blk = e ? S.mon.blocks[sm.ref] : null;
-  const img = e && e.img ? `<img class="sbimg" src="${esc(monImgSrc(sm))}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : (c.image ? `<img class="sbimg" src="${c.image}" alt="">` : "");
+  const isrc = c.image || monImgSrc(sm);
+  const img = isrc ? `<img class="sbimg" src="${esc(isrc)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : "";
   const foot = e && e.src ? `<p class="sbsrc">Source: ${esc(e.src)}${e.ed ? " (" + e.ed + ")" : ""}</p>` : "";
   if (typeof blk === "string" && blk) return `<div class="statblock aidedd">${img}${prepStatHtml(blk, name)}${foot}</div>`;
   // plain text (custom monsters or older imports)
@@ -488,9 +657,9 @@ function statBlock(sm) {
     let h = esc(l); const lm = l.match(LABEL);
     if (lm) h = `<strong>${esc(lm[0])}</strong>${esc(l.slice(lm[0].length))}`;
     else { const tm = l.match(/^([A-Z][^.:]{1,60}?(?:\([^)]*\))?)\.\s/); if (tm) h = `<strong><em>${esc(tm[1])}.</em></strong> ${esc(l.slice(tm[0].length))}`; }
-    body += `<p>${sbLinks(h, name)}</p>`;
+    body += `<p>${h}</p>`;
   });
-  return `<div class="statblock aidedd">${img}<h1>${esc(name)}</h1>${head ? `<div class="type">${esc(head)}</div>` : ""}${chips.length ? `<div class="red">${chips.map(x => `<span>${esc(x)}</span>`).join(" · ")}</div><hr>` : ""}${npcLinks(body)}${foot}</div>`;
+  return `<div class="statblock aidedd">${img}<h1>${esc(name)}</h1>${head ? `<div class="type">${esc(head)}</div>` : ""}${chips.length ? `<div class="red">${chips.map(x => `<span>${esc(x)}</span>`).join(" · ")}</div><hr>` : ""}${prepStatHtml(body, name, false)}${monSpellsHtml(c)}${foot}</div>`;
 }
 function vMonsters() {
   const sc = S.scen, groups = {};
@@ -504,7 +673,7 @@ function vMonsters() {
       <span class="right small muted">${nodes.length ? "used in " : "not used yet"}</span>${nodes.map(nd => `<span class="chip">#${nd.n} ×${(nd.monsters.find(x => x.id === m.id) || {}).n || 0}</span>`).join("")}</div>
       ${open ? `<div style="margin-top:6px"><div class="row small"><label>Group ${inp(`monsters.${i}.group`, m.group || "", { ph: "e.g. Forge guards", attr: 'list="groupnames"' })}</label>
         ${sc.nodes.length ? `<select data-act="linkMonNode" data-m="${m.id}"><option value="">+ add to node / encounter…</option>${sc.nodes.slice().sort((a, b) => a.n - b.n).map(nd => `<option value="${nd.id}">#${nd.n} ${esc(nd.title || "")}</option>`).join("")}</select>` : ""}
-        <button class="small ghost right" data-act="delMon" data-id="${m.id}">Remove</button></div>
+        <button class="small ghost" data-act="editMon" data-id="${m.id}">✎ ${m.custom && !m.ref ? "Edit" : "Edit as copy"}</button><button class="small ghost right" data-act="delMon" data-id="${m.id}">Remove</button></div>
         <textarea data-live="monsters.${i}.notes" placeholder="Your notes (tactics, loot, personality…)" style="min-height:50px;margin-top:6px">${esc(m.notes || "")}</textarea>
         ${statBlock(m)}</div>` : ""}</div>`;
   }).join("")).join("");
@@ -553,6 +722,7 @@ function vNpcs() {
           <label class="small">Role / description ${inp(`npcs.${i}.role`, n.role || "", { ph: "e.g. Dwarven smith, quest giver", style: "width:100%" })}</label>
           <label class="small">Where to find them ${sel(`npcs.${i}.node`, n.node || "", sc.nodes.slice().sort((a, b) => a.n - b.n).map(nd => [nd.id, "#" + nd.n + " " + (nd.title || "")]), { blank: "— no node —" })}</label>
           <label class="small">Notes (personality, voice, what they know, secrets)<textarea data-live="npcs.${i}.notes" style="min-height:140px">${esc(n.notes || "")}</textarea></label>
+          ${npcStatBox(n, i)}
           <div><button class="small ghost danger" style="color:#fff" data-act="delNpc" data-id="${n.id}">🗑 Delete NPC</button></div></div>` : ""}</div>`; }).join("") || '<p class="muted">No NPCs yet.</p>'}</div>`;
 }
 function nameTags() { if (!S.ui.nameTags) { try { S.ui.nameTags = JSON.parse(localStorage.getItem("dmNameTags") || "null"); } catch (e) { } S.ui.nameTags ||= ["medieval", "surname"]; } return S.ui.nameTags; }
@@ -569,20 +739,20 @@ function mNpc() {
   return `<div class="row" style="flex-wrap:nowrap;align-items:flex-start">${n.image ? `<img src="${n.image}" style="width:140px;max-height:200px;object-fit:cover;border-radius:10px">` : ""}
     <div class="grow"><h2 style="margin:0">${esc(n.name)}</h2><div class="muted">${esc(n.role || "")}</div>${nd ? `<p class="small">📍 #${nd.n} ${esc(nd.title || "")}</p>` : ""}</div></div>
     <div class="desc" style="margin-top:10px">${richText(n.notes) || '<span class="muted">No notes yet.</span>'}</div>
-    <div class="foot"><button class="ghost" data-act="npcGo" data-id="${n.id}">Open in NPCs tab</button><button data-act="closeModal">Close</button></div>`;
+    ${(() => { const sm = S.scen.monsters.find(m => m.id === n.mon); return sm ? `<details><summary><b>⚔ Stat block: ${esc(monName(sm))}</b></summary>${statBlock(sm)}</details>` : ""; })()}
+    <div class="foot">${S.scen.monsters.some(m => m.id === n.mon) ? `<button class="ghost" data-act="npcCombat" data-id="${n.id}">⚔ Add to combat</button>` : ""}<button class="ghost" data-act="npcGo" data-id="${n.id}">Open in NPCs tab</button><button data-act="closeModal">Close</button></div>`;
 }
 
 // ----- notes -----
 function vNotes() {
   const sc = S.scen, editing = S.ui.editNotes || !sc.notes;
-  return `<div class="two"><div class="card"><h3>Secrets &amp; clues</h3><p class="small muted">Tick them off when the players discover them.</p>
-      ${sc.secrets.map((s, i) => `<div class="tokrow"><input type="checkbox" data-path="secrets.${i}.done" ${s.done ? "checked" : ""}><input type="text" data-path="secrets.${i}.text" value="${esc(s.text)}" style="flex:1;min-width:160px;${s.done ? "text-decoration:line-through;opacity:.6" : ""}">
-        ${sel(`secrets.${i}.node`, s.node || "", sc.nodes.slice().sort((a, b) => a.n - b.n).map(nd => [nd.id, "#" + nd.n + " " + (nd.title || "")]), { blank: "— node —" })}<a href="#" data-act="delSecret" data-i="${i}">✕</a></div>`).join("")}
-      <div class="row" style="margin-top:8px"><input id="newSecret" placeholder="New secret or clue…" style="flex:1"><button class="small" data-act="addSecret">+ Add</button></div></div>
+  return `<div class="two"><div class="card"><h3>Secrets &amp; clues</h3><p class="small muted">Tick them off when the players discover them. They also show in the 📜 window on the Overview page.</p>
+      ${sc.secrets.map((s, i) => S.ui.secEdit === i ? `<div class="secret"><textarea data-live="secrets.${i}.text" style="min-height:70px;flex:1">${esc(s.text || "")}</textarea><button class="small" data-act="secEdit" data-i="${i}">✔</button></div>` : secretRow(s, i)).join("") || '<p class="small muted">No secrets yet.</p>'}
+      <div class="row" style="margin-top:8px"><textarea id="newSecret" placeholder="New secret or clue…" rows="2" style="flex:1"></textarea><button class="small" data-act="addSecret">+ Add</button></div>
+      ${(S.items.list || []).length ? `<div style="margin-top:8px"><input placeholder="💎 add a magic item as a secret / clue…" value="${esc(S.ui.secItemQ || "")}" data-act-input="secItemQ" style="width:100%"><div id="secitemres">${secItemResults(norm(S.ui.secItemQ || ""))}</div></div>` : ""}</div>
     <div class="card"><div class="row"><h3 style="margin:0">Notes</h3><button class="small ghost right" data-act="editNotes">${editing ? "✔ Done" : "✎ Edit"}</button></div>
       ${editing ? `<textarea data-live="notes" style="min-height:420px;margin-top:8px" placeholder="Session plan, NPCs, hooks, loot… NPC names become links.">${esc(sc.notes || "")}</textarea>` : `<div class="desc readtext" style="margin-top:8px">${richText(sc.notes)}</div>`}</div></div>`;
 }
-
 // ----- modals -----
 function mQR() {
   const ips = S.net?.ips || [], port = S.net?.port || location.port || 8766;
@@ -607,16 +777,18 @@ function mCustom() {
 
 // ---------- actions ----------
 Object.assign(ACT, {
-  home: async () => { await flushSave(); S.view = "home"; S.scen = null; S.mapId = null; Object.assign(S.ui, { ovZ: null, popNode: null, openNode: null, placing: false, editNode: null }); await loadList(); render(); },
+  home: async () => { await flushSave(); S.view = "home"; S.scen = null; S.mapId = null; Object.assign(S.ui, { z: {}, popNode: null, openNode: null, placing: null, editNode: null }); await loadList(); render(); },
   theme: () => { const r = document.documentElement; r.dataset.theme = r.dataset.theme === "dark" ? "light" : "dark"; try { localStorage.setItem("dmtheme", r.dataset.theme); } catch (e) { } },
   newScen: async () => { const n = ($("#newname").value || "").trim(); S.scen = newScenario(n || "New scenario"); S.view = "scen"; S.tab = "overview"; await Store.put(S.scen); render(); },
   openScen: async el => { await flushSave(); const sc = await Store.get(el.dataset.id); if (!sc) return toast("Scenario not found");
-    S.scen = migrateScen(sc); S.view = "scen"; S.tab = "overview"; S.mapId = null; Object.assign(S.ui, { ovZ: null, popNode: null, openNode: null, placing: false, editNode: null, synOpen: false, editSyn: false }); render(); window.scrollTo(0, 0); },
+    S.scen = migrateScen(sc); S.view = "scen"; S.tab = "overview"; S.mapId = null; Object.assign(S.ui, { z: {}, popNode: null, openNode: null, placing: null, editNode: null, editBlock: null, synOpen: false, editSyn: false }); render(); window.scrollTo(0, 0); },
   synTog: () => { S.ui.synOpen = !S.ui.synOpen; render(); },
   synEdit: () => { S.ui.editSyn = !(S.ui.editSyn || !S.scen.synopsis); render(); },
-  listTog: el => { S.ui[el.dataset.k] = S.ui[el.dataset.k] === false; render(); },
-  popClose: () => { S.ui.popNode = null; drawOverview(); },
-  popEdit: el => { S.ui.popNode = null; S.ui.openNode = el.dataset.id; S.ui[isWorld() ? "wList" : "nList"] = true; render(); setTimeout(() => $("#node-" + el.dataset.id)?.scrollIntoView({ behavior: "smooth", block: "start" }), 30); },
+  listTog: el => { const l = S.ui.list ||= {}; l[el.dataset.k] = l[el.dataset.k] === false; render(); },
+  popClose: () => { S.ui.popNode = null; S.ui.popEditing = null; render(); },
+  popEditHere: el => { S.ui.popEditing = el.dataset.id; drawAllMaps(); setTimeout(() => $(".npop.editing textarea")?.focus(), 30); },
+  popDone: () => { S.ui.popEditing = null; render(); },
+  popEdit: el => { const nd = doc().nodes.find(n => n.id === el.dataset.id); S.ui.popNode = null; S.ui.popEditing = null; S.ui.openNode = el.dataset.id; (S.ui.list ||= {})[nodeMapId(nd)] = true; render(); setTimeout(() => $("#node-" + el.dataset.id)?.scrollIntoView({ behavior: "smooth", block: "start" }), 30); },
   monType: el => { const t = el.dataset.t; const a = S.ui.monTypes || []; S.ui.monTypes = !t ? [] : a.includes(t) ? a.filter(x => x !== t) : [...a, t]; render(); },
   delScen: async () => { if (!confirm(`Delete "${S.scen.name}" on all your devices?${S.server ? " (the laptop keeps a copy in scenarios/deleted)" : ""}`)) return; pendingScen = null; await Store.del(S.scen.id); S.scen = null; ACT.home(); },
   exportScen: () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(S.scen)], { type: "application/json" })); a.download = S.scen.name.replace(/[^\w-]+/g, "_") + ".scenario.json"; a.click(); },
@@ -629,6 +801,10 @@ Object.assign(ACT, {
         if (j.world && (j.world.updated || 0) > (S.world?.updated || 0)) { await Store.putWorld(j.world, false); Folder.pushWorld(j.world); await loadWorld(); }
         let mon = "";
         if (j.monsters && (j.monsters.list || []).length && j.monsters.imported !== S.mon.imported) { await Store.setMon(j.monsters); await loadMonsters(); mon = ` · ${j.monsters.list.length} monsters`; }
+        if (j.items && j.items.imported !== S.items.imported) { await Store.setItems(j.items); await loadItems(); mon += ` · ${(j.items.list || []).length} magic items`; }
+        if ((j.myItems || []).length) { const a = S.myItems ||= []; let n = 0; j.myItems.forEach(x => { const i = a.findIndex(y => y.id === x.id); if (i < 0) { a.push(x); n++; } else if ((x.updated || 0) > (a[i].updated || 0)) { a[i] = x; n++; } }); await saveMyItems(); if (n) mon += ` · ${n} of your own items`; }
+        if (j.monImages && Object.keys(j.monImages).length) { Object.assign(S.mimg, j.monImages); await DDB.set("mimg", S.mimg); mon += ` · ${Object.keys(j.monImages).length} monster images`; }
+        if (j.spells && (j.spells.list || []).length && (j.spells.imported || "") >= (S.spells?.imported || "")) { await setSpells(j.spells); mon += ` · ${j.spells.list.length} spells`; }
         if (S.scen) { const cur = await Store.get(S.scen.id); if (cur) S.scen = migrateScen(cur); }
         await loadList(); render(); return toast(`${neu} scenarios new or updated, ${same} already up to date${mon}`); }
       if (Array.isArray(j.list) && j.blocks) { await Store.setMon(j); await loadMonsters(); render(); return toast(j.list.length + " monsters loaded"); }
@@ -636,7 +812,10 @@ Object.assign(ACT, {
     catch (e) { toast("Not a scenario, backup or monster file"); } }; f.click(); },
   exportAll: async () => { await flushSave(); const scs = []; for (const s of await Store.list()) scs.push(await Store.get(s.id));
     const mon = (S.mon.list || []).length ? { ...S.mon } : null; if (mon) delete mon.byKey;
-    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify({ format: "dm-tool-backup-v1", saved: new Date().toISOString(), scenarios: scs, world: S.world, monsters: mon })], { type: "application/json" }));
+    const items = (S.items.list || []).length || (S.items.trinkets || []).length ? { ...S.items, list: (S.items.list || []).filter(x => x.ed !== "custom"), blocks: Object.fromEntries(Object.entries(S.items.blocks || {}).filter(([k]) => !k.endsWith("|custom"))) } : null; if (items) delete items.byKey;
+    toast("Collecting monster images…"); const monImages = await collectMonImages(scs);
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify({ format: "dm-tool-backup-v1", saved: new Date().toISOString(), scenarios: scs, world: S.world, monsters: mon, items, myItems: S.myItems || [], monImages, spells: S.spells && S.spells.list.length ? S.spells : null })], { type: "application/json" }));
+    toast(`Backup saved (${Object.keys(monImages).length} monster images included)`);
     a.download = "dm-tool-backup-" + new Date().toISOString().slice(0, 10) + ".json"; a.click(); },
   exportMon: () => { const m = { ...S.mon }; delete m.byKey; const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(m)], { type: "application/json" })); a.download = "monsters.json"; a.click(); },
   syncTap: () => { if (Sync.status === "signin" || Sync.status === "error") Sync.connect(); else Sync.run(); },
@@ -646,11 +825,26 @@ Object.assign(ACT, {
   impMon: async () => { await api("api/monsters/import", { method: "POST", body: { include2014: !!$("#imp2014")?.checked, images: !!$("#impImg")?.checked } }); S.ui.imp = { running: true, done: 0, total: 0, msg: "Starting…" }; render(); pollImport(); },
   tab: el => { S.tab = el.dataset.k; if (S.tab !== "maps") S.mapId = null; S.ui.bmZ = null; render(); },
   // overview
-  setOvMap: async () => { const img = await pickImage(2600); if (!img) return; doc().map = { image: img.data, w: img.w, h: img.h }; if (!isWorld()) S.scen.thumb = img.thumb; S.ui.ovZ = null; save(); render(); },
-  togglePlace: () => { S.ui.placing = !S.ui.placing; render(); },
-  ovZoom: el => { const host = $("#ovmap"); S.ui.ovZ = el.dataset.d === "fit" ? MapView.fitZoom(host, doc().map) : S.ui.ovZ * +el.dataset.d; drawOverview(); },
+  setOvMap: async el => { const bid = el.dataset.map, img = await pickImage(2600); if (!img) return; const m = { image: img.data, w: img.w, h: img.h };
+    if (isWorld()) S.world.map = m; else { const b = S.scen.blocks.find(x => x.id === bid); b.map = m; b.thumb = img.thumb; if (!b.title) b.title = img.name; }
+    (S.ui.z ||= {})[bid] = null; save(); render(); },
+  togglePlace: el => { S.ui.placing = S.ui.placing === el.dataset.map ? null : el.dataset.map; render(); },
+  toggleMove: el => { S.ui.moving = S.ui.moving === el.dataset.map ? null : el.dataset.map; render(); },
+  ovZoom: el => { const bid = el.dataset.map, b = mapBlock(bid), host = document.getElementById("ovmap-" + bid), dd = el.dataset.d;
+    S.ui.z[bid] = dd === "fit" ? MapView.fitZoom(host, b.map) : dd === "fith" ? Math.min(4, Math.max(0.05, (window.innerHeight * 0.72 - 6) / b.map.h)) : S.ui.z[bid] * +dd; drawOverview(bid); },
+  addBlock: async el => { const at = +el.dataset.at, t = el.dataset.t; let b;
+    if (t === "map") { const img = await pickImage(2600); if (!img) return; b = { id: "m" + uid(), type: "map", title: img.name || "Map", map: { image: img.data, w: img.w, h: img.h }, thumb: img.thumb }; }
+    else { b = { id: "t" + uid(), type: "text", title: "", text: "" }; S.ui.editBlock = b.id; }
+    S.scen.blocks.splice(at, 0, b); save(); render(); setTimeout(() => { const e = $("#block-" + b.id); e?.scrollIntoView({ behavior: "smooth", block: "start" }); e?.querySelector("textarea")?.focus(); }, 40); },
+  moveBlock: el => { const bl = S.scen.blocks, i = bl.findIndex(b => b.id === el.dataset.id), j = i + +el.dataset.d; if (j < 0 || j >= bl.length) return; [bl[i], bl[j]] = [bl[j], bl[i]]; save(); render(); },
+  delBlock: el => { const sc = S.scen, b = sc.blocks.find(x => x.id === el.dataset.id); const nodes = b.type === "map" ? nodesOf(b.id) : [];
+    if (!confirm(b.type === "map" ? `Delete the map "${b.title || "Map"}"${nodes.length ? ` and its ${nodes.length} nodes` : ""}?` : "Delete this text block?")) return;
+    const gone = new Set(nodes.map(n => n.id)); sc.blocks = sc.blocks.filter(x => x !== b); sc.nodes = sc.nodes.filter(n => !gone.has(n.id));
+    sc.secrets.forEach(x => { if (gone.has(x.node)) x.node = ""; }); sc.npcs.forEach(x => { if (gone.has(x.node)) x.node = ""; });
+    save(); render(); },
+  editBlock: el => { S.ui.editBlock = el.dataset.id || null; render(); },
   openNode: el => { S.ui.openNode = S.ui.openNode === el.dataset.id ? null : el.dataset.id; render(); },
-  delNode: el => { if (!confirm("Delete this node?")) return; const d = doc(); d.nodes = d.nodes.filter(n => n.id !== el.dataset.id); (d.secrets || []).forEach(s => { if (s.node === el.dataset.id) s.node = ""; }); save(); render(); },
+  delNode: el => { if (!confirm("Delete this node?")) return; const d = doc(); (d.loot || []).forEach(L => { if (L.node === el.dataset.id) L.node = ""; }); if (S.ui.popNode === el.dataset.id) { S.ui.popNode = null; S.ui.popEditing = null; } d.nodes = d.nodes.filter(n => n.id !== el.dataset.id); (d.secrets || []).forEach(s => { if (s.node === el.dataset.id) s.node = ""; }); save(); render(); },
   encN: el => { const nd = S.scen.nodes.find(n => n.id === el.dataset.n); const x = nd.monsters.find(k => k.id === el.dataset.m); x.n = Math.max(0, (+x.n || 0) + +el.dataset.d); if (!x.n) nd.monsters = nd.monsters.filter(k => k !== x); save(); render(); },
   encDel: el => { const nd = S.scen.nodes.find(n => n.id === el.dataset.n); nd.monsters = nd.monsters.filter(k => k.id !== el.dataset.m); save(); render(); },
   editNode: el => { S.ui.editNode = el.dataset.id || null; render(); },
@@ -704,7 +898,7 @@ Object.assign(ACT, {
   saveCustom: () => { const c = { name: $("#cm_name").value.trim() || "Custom monster", size: $("#cm_size").value, type: $("#cm_type").value, cr: $("#cm_cr").value, ac: $("#cm_ac").value, hp: $("#cm_hp").value, text: $("#cm_text").value };
     S.scen.monsters.push({ id: uid(), name: c.name, custom: c, count: 1, group: "", notes: "" }); S.modal = null; save(); render(); },
   // notes
-  addSecret: () => { const t = ($("#newSecret").value || "").trim(); if (!t) return; S.scen.secrets.push({ id: uid(), text: t, done: false, node: "" }); save(); render(); },
+  addSecret: el => { const box = document.getElementById(el.dataset.src || "newSecret"), t = (box?.value || "").trim(); if (!t) return; S.scen.secrets.push({ id: uid(), text: t, done: false }); save(); render(); setTimeout(() => document.getElementById(el.dataset.src || "newSecret")?.focus(), 30); },
   delSecret: el => { S.scen.secrets.splice(+el.dataset.i, 1); save(); render(); }
 });
 Object.assign(CHG, {
@@ -744,7 +938,8 @@ document.addEventListener("input", e => {
   if (el.dataset.live && doc()) { setPath(doc(), el.dataset.live, el.value); save();
     const mm = el.dataset.live.match(/^nodes\.(\d+)\.text$/); if (mm) S.ui.editNode = doc().nodes[+mm[1]].id;
     if (el.dataset.live === "notes") S.ui.editNotes = true;
-    if (el.dataset.live === "synopsis") S.ui.editSyn = true; }
+    if (el.dataset.live === "synopsis") S.ui.editSyn = true;
+    const bm = el.dataset.live.match(/^blocks\.(\d+)\.text$/); if (bm) S.ui.editBlock = doc().blocks[+bm[1]].id; }
   if (el.dataset.actInput === "monq") { S.ui.monq = el.value; $("#monlist").innerHTML = monList(); }
 });
 $("#modal").addEventListener("mousedown", e => { if (e.target.id === "modal") { S.modal = null; renderModal(); } });
@@ -761,17 +956,17 @@ function bindBattlemap() {
     const m = curMap(); const t = m.tokens.find(k => k.id === id); if (t) { t.x = x; t.y = y; }
     save(); drawBattlemap();
     if (S.live && S.live.mapId === m.id) api("api/table/move", { method: "POST", body: { id, x, y } });
-  }, id => { S.ui.selTok = S.ui.selTok === id ? null : id; render(); });
+  }, id => { S.ui.selTok = S.ui.selTok === id ? null : id; render(); }, mapExtras(() => curMap(), () => drawBattlemap()));
 }
 
-const APP_VERSION = "2026-10-27";
-(async function init() {
+const APP_VERSION = "2026-11-02c";
+async function init() {
   try { const t = localStorage.getItem("dmtheme"); if (t) document.documentElement.dataset.theme = t; } catch (e) { }
   await Sync.init();
   S.server = await detectServer();
   if (S.server) await Folder.pull();          // laptop: bring in scenario files from the scenarios folder
-  await Promise.all([loadList(), loadMonsters(), loadWorld()]);
-  bindOverview(); bindBattlemap();
+  await Promise.all([loadList(), loadMonsters(), loadWorld(), loadItems().then(loadMyItems), (async () => { S.mimg = (await DDB.get("mimg")) || {}; })(), loadSpells()]);
+  bindOverview(); bindBattlemap(); if (typeof bindCbMap === "function") bindCbMap();
   render(); renderSyncChip();
   if (S.server) { const st = await api("api/monsters/import"); if (st.running) { S.ui.imp = st; pollImport(); } dmPoll(); }
   else if ("serviceWorker" in navigator && location.protocol === "https:") {
@@ -779,4 +974,6 @@ const APP_VERSION = "2026-10-27";
     let reloaded = false; navigator.serviceWorker.addEventListener("controllerchange", () => { if (!reloaded && !document.querySelector("textarea:focus,input:focus")) { reloaded = true; location.reload(); } });
   }
   Sync.soon(800);
-})();
+}
+// start once every script (dice, spells, combat, map maker) is loaded
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else setTimeout(init, 0);

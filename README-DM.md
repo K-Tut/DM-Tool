@@ -38,6 +38,17 @@ The DM Tool also runs as an app on your phone, from its GitHub Pages site: `http
 - **Laptop only:** sharing a battlemap with players (📡) needs the laptop.
 - **Without Drive:** **⤓ Backup everything** saves one file with your scenarios, the world map and the monsters. Open it with **⤒ Import** on the other device. Only newer versions replace what's already there, so importing an old backup can't undo newer work. Deleting a scenario does *not* carry over this way; delete it on both devices.
 
+## Magic items, trinkets and loot
+
+**Library:** on the start page, click **Import magic items from aidedd.org** (laptop, needs internet once; tick "also older 2014 items" if you want them). It also reads the official trinket table from the 2024 rules wiki; if that isn't found, the app uses its own list of 100 trinkets. Your backup file or Drive sync takes the library to the phone. If items look wrong after the import, run `python item_importer.py --test https://www.aidedd.org/magic-item/` and send the output to Claude.
+
+**💰 Loot tab** (in a scenario):
+- **+ New loot list** for each treasure (a chest, a hoard, what the boss carries…). Link it to a node with **at #n**; the node and its popup then show the loot.
+- **Library** on the right: search, filter by rarity and type, hide attunement items, open an item to read it, and **+ Add** puts it into the highlighted loot list. The trinkets tab has **🎲 Random trinket**.
+- **🎲 Generate…**: *Treasure hoard* or *Individual treasure* (per creature) for CR 0–4, 5–10, 11–16 or 17+, with or without magic items, gems & art and trinkets. **Generate** replaces the list; **+ Add to list** adds to it.
+- **Edit freely afterwards:** change coin amounts and quantities, ✕ remove items, 🎲 swap one item for another of the same kind, or type your own item.
+- Tap an item's name to read its description.
+
 ## World map
 
 The start page has a **🌍 World map** under your scenarios.
@@ -52,8 +63,11 @@ Click a node on any map (world or scenario) and its description opens right ther
 ## Preparing a scenario
 
 1. **Start page:** type a name (e.g. *Dwarven Forge*), then click **+ New scenario**. Under the title, add a **subtitle** (one or two sentences, shown on the start page) and, if you like, a fold-out **📖 Synopsis**. At the top of the scenario, set **Party: players and level**. The difficulty uses the DMG XP thresholds and group multipliers, like donjon's Encounter Size Calculator (fewer than 3 players count one step harder, 6 or more one step easier).
-2. **Overview & nodes:** add your dungeon map image.
-   - Click **➕ Place nodes**, then click on the map. Each click adds a numbered node.
+2. **Overview & nodes:** build the overview from **maps / images** and **text blocks**, in any order. Examples: dungeon level 1, a text about the tunnel, level 2, the town map, a handout picture.
+   - Use **＋ Text block** / **＋ Map / image** between the blocks to insert one there. Move blocks with ↑ ↓ and delete them with 🗑 (deleting a map also deletes its nodes).
+   - Each map has its own **➕ Place nodes** and node list. Click on the map: each click adds a numbered node. The numbers run on across all maps of the scenario.
+   - Tap a node to read it in a popup right on the map. Use **✎ Edit** there to change its name, type and text, or to delete it; the encounter and battlemap are set in the node list.
+   - Nodes only move while **✥ Move nodes** is switched on, so scrolling the map never moves one by accident.
    - Open a node in the list below the map to fill it in:
      - a title (e.g. *Throne room*)
      - a type (room, encounter, trap, secret, clue, treasure, NPC)
@@ -69,10 +83,14 @@ Click a node on any map (world or scenario) and its description opens right ther
 4. **Monsters:**
    - Search the compendium and click **+ Add**. Filter by **type** (tap several: Fiend, Fey, Monstrosity…) and **sort** by CR. Add each kind of monster **once**; how many show up where is set per node.
    - Put monsters into **groups** (e.g. *Forge guards*), add them to nodes, and add your notes. The list shows where each monster is used (#3 ×4).
-   - Tap any dice in a stat block (🎲+4, 🎲2d6 + 3) to roll.
-5. **NPCs:** **🎲 Random names** suggests six names. Pick any mix of tags (Medieval, German, Scandinavian, Elvish, Dwarvish… plus Male/Female, surname, epithet), then click a name to add that NPC.
+   - Roll straight from the stat block:
+     - **⚔ attack names** (e.g. *⚔ Scimitar.*) and the attack bonus after *Attack Roll:* (🎲+5) roll a d20 + bonus to hit, then offer **🎲 Roll damage** (on a natural 20: **Critical damage!**, with doubled dice).
+     - Underlined numbers roll a d20: ability **checks** and **saves** (the MOD and SAVE boxes), **Saving Throws**, **Skills** and **Initiative**.
+     - Any dice (🎲2d6 + 3) roll that damage.
+5. **Monster links:** the names of the scenario's monsters (also plurals like *bullywugs*) become red links in node texts, text blocks, the synopsis and notes. Tap one to see the stat block.
+6. **NPCs:** **🎲 Random names** suggests six names. Pick any mix of tags (Medieval, German, Scandinavian, Elvish, Dwarvish… plus Male/Female, surname, epithet), then click a name to add that NPC.
     add an NPC with a name, picture, role, where to find them, and notes. Anywhere you write their name (or an alias such as *the forge master*) in a node description or the notes, it becomes a link. Tap it to see their card.
-6. **Secrets & notes:** keep a checklist of secrets and clues (tick them off when discovered), plus free notes.
+7. **Secrets & notes:** keep a checklist of secrets and clues (tick them off when discovered), plus free notes.
 
 Scenarios are saved automatically on the device and, on the laptop, in `scenarios/` (the previous version goes to `scenarios/backup`). **⤓ Export** saves the whole scenario, images included, as one file you can back up or give to another DM (**⤒ Import** on the start page).
 
@@ -104,6 +122,8 @@ This whole folder is its own GitHub repository, e.g. `DM-Tool`. Your `scenarios`
 |---|---|
 | `dm.py` | local server (DM screen, player table, live sync) |
 | `monster_importer.py` | aidedd.org monster downloader |
+| `item_importer.py` | aidedd.org magic item + trinket downloader |
+| `data/items.json` | imported magic item library |
 | `docs/` | the app (DM screen `index.html`, player page `table.html`), also published by GitHub Pages |
 | `scenarios/` | your scenarios |
 | `data/monsters.json` | imported monster compendium |
