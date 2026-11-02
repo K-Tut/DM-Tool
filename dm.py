@@ -78,6 +78,7 @@ def bump():
 
 
 _mon = {"mtime": 0, "map": {}}
+_img_fail = {}   # monster images that could not be downloaded (key -> time)
 
 
 def monster_entry(key):
@@ -233,14 +234,24 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_bytes(b"", "text/plain", 404)
             import monster_importer as mi
             f = mi.image_file(e)
-            if not f.exists():
+            # download on first use, but give up quickly and don't retry for a while (no internet at the table)
+            if not f.exists() and time.time() - _img_fail.get(key, 0) > 600:
                 try:
                     import requests
-                    mi.cache_image(requests.Session(), e)
+                    r = requests.get(e["img"], headers=mi.HEADERS, timeout=4)
+                    if r.ok and r.headers.get("content-type", "").startswith("image"):
+                        f.parent.mkdir(parents=True, exist_ok=True)
+                        f.write_bytes(r.content)
                 except Exception:
                     pass
+                if not f.exists():
+                    _img_fail[key] = time.time()
             if not f.exists():
-                return self.send_bytes(b"", "text/plain", 404)
+                self.send_response(404)
+                self.send_header("Content-Length", "0")
+                self.send_header("Cache-Control", "max-age=600")
+                self.end_headers()
+                return
             self.send_response(200)
             body = f.read_bytes()
             self.send_header("Content-Type", mimetypes.guess_type(str(f))[0] or "image/jpeg")

@@ -131,6 +131,7 @@ document.getElementById("zout").onclick = () => { T.fitMode = false; T.z = (T.z 
 document.getElementById("zfit").onclick = () => { T.fitMode = true; draw(); };
 window.addEventListener("resize", () => { if (T.fitMode) draw(); });
 meBtn();
-if (ME) join(); else showJoin();
-setInterval(join, 45000);
-poll();
+// start the live connection only once the page has finished loading — otherwise phone browsers keep
+// showing the loading bar for as long as the connection stays open
+function start() { if (ME) join(); else showJoin(); setInterval(join, 45000); setTimeout(poll, 50); }
+if (document.readyState === "complete") start(); else window.addEventListener("load", start);
