@@ -17,12 +17,13 @@ const MM_ICONS = [
 ];
 const MM = {
   st: null,   // {target:{kind,id}, sk, tool, rot, cs, undo:[], title}
-  blank(cols = 36, rows = 26) { return { cols, rows, cells: "0".repeat(cols * rows), items: [], labels: [], style: "blue" }; },
+  blank(cols = 36, rows = 26) { return { cols, rows, cells: "0".repeat(cols * rows), items: [], labels: [], strokes: [], style: "book", deco: { border: true, title: true, compass: true, scale: true, pos: "tl" } }; },
   cell(sk, x, y) { return x < 0 || y < 0 || x >= sk.cols || y >= sk.rows ? "0" : sk.cells[y * sk.cols + x]; },
   setCell(sk, x, y, v) { if (x < 0 || y < 0 || x >= sk.cols || y >= sk.rows) return; const i = y * sk.cols + x; sk.cells = sk.cells.slice(0, i) + v + sk.cells.slice(i + 1); },
 
   // ---------- drawing ----------
-  draw(cx, sk, cs, opt = {}) {
+  draw(cx, sk, cs, opt = {}) { return this.useMask(sk) ? this.drawMask(cx, sk, cs, opt) : this.drawGrid(cx, sk, cs, opt); },
+  drawGrid(cx, sk, cs, opt = {}) {
     const T = MM_STYLES[sk.style] || MM_STYLES.blue, W = sk.cols * cs, H = sk.rows * cs;
     cx.save(); cx.fillStyle = T.rock; cx.fillRect(0, 0, W, H);
     if (T.hatch) { cx.strokeStyle = T.hatch; cx.lineWidth = Math.max(1, cs / 16); cx.beginPath(); for (let d = -H; d < W; d += cs / 3) { cx.moveTo(d, H); cx.lineTo(d + H, 0); } cx.stroke(); }
@@ -125,40 +126,49 @@ const MM = {
     cx.restore();
   },
   iconImg(t, style) { const c = document.createElement("canvas"); c.width = c.height = 34; const cx = c.getContext("2d"); const T = MM_STYLES[style] || MM_STYLES.blue; cx.fillStyle = T.floor; cx.fillRect(0, 0, 34, 34); this.icon(cx, t, 17, 17, 30, 0, T); return c.toDataURL(); },
-  render(sk, cs = 40) { const c = document.createElement("canvas"); c.width = sk.cols * cs; c.height = sk.rows * cs; this.draw(c.getContext("2d"), sk, cs); return c; },
+  render(sk, cs = 40, title) { const Mg = this.margin(sk), c = document.createElement("canvas"); c.width = (sk.cols + 2 * Mg) * cs; c.height = (sk.rows + 2 * Mg) * cs; this.draw(c.getContext("2d"), sk, cs, { title }); return c; },
 
   // ---------- editor ----------
   open(target, sk, title) {
-    this.st = { target, sk: clone(sk), tool: "room", rot: 0, cs: Math.max(18, Math.min(34, Math.floor((Math.min(window.innerWidth, 1400) - 40) / sk.cols))), undo: [], redo: [], title: title || "" };
+    const k = clone(sk); k.strokes ||= [];
+    this.st = { target, sk: k, tool: "room", rot: 0, brush: 1, cs: Math.max(18, Math.min(34, Math.floor((Math.min(window.innerWidth, 1400) - 40) / (sk.cols + 4)))), undo: [], redo: [], title: title || "" };
+    try { document.fonts && document.fonts.load(`700 40px ${MM_FONT}`).then(() => this.st && this.paint()); } catch (e) { }
     let el = document.getElementById("mm"); if (!el) { el = document.createElement("div"); el.id = "mm"; document.body.appendChild(el); }
     el.classList.remove("hidden"); document.body.classList.add("mm-open"); this.ui();
   },
   ui() {
     const st = this.st, sk = st.sk, el = document.getElementById("mm");
-    const tools = [["room", "▭", "Room (drag a rectangle)"], ["floor", "🖌", "Floor / corridor (paint)"], ["erase", '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M14.5 3.5l6 6-9.5 9.5H6l-3-3z"/><path d="M9.5 8.5l6 6" /><path d="M3 16l3 3" /><path d="M11 19h9" stroke-linecap="round"/><path d="M14.5 3.5l6 6-5 5-6-6z" fill="currentColor" opacity=".35"/></svg>', "Eraser (back to rock, removes icons)"], ["water", "≈", "Water"], ["rubble", "∴", "Rubble floor"], ["label", "1", "Number or text"], ["pan", "✋", "Scroll / move around"]];
+    const tools = [["room", "▭", "Room (drag a rectangle)"], ["floor", "🖌", "Floor / corridor (paint)"], ["cave", "🪨", "Cave brush (free shapes)"], ["wbrush", "🌊", "Water brush (rivers, pools)"], ["erase", '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M14.5 3.5l6 6-9.5 9.5H6l-3-3z"/><path d="M9.5 8.5l6 6" /><path d="M3 16l3 3" /><path d="M11 19h9" stroke-linecap="round"/><path d="M14.5 3.5l6 6-5 5-6-6z" fill="currentColor" opacity=".35"/></svg>', "Eraser (back to rock, removes icons)"], ["water", "≈", "Water squares"], ["rubble", "∴", "Rubble floor"], ["label", "1", "Number or text"], ["pan", "✋", "Scroll / move around"]];
     el.innerHTML = `<div class="mm-top"><b>✏ Map maker</b><input id="mm_title" value="${esc(st.title)}" placeholder="Map name" style="width:160px">
         <label class="small">Style <select id="mm_style">${Object.entries(MM_STYLES).map(([k, v]) => `<option value="${k}" ${sk.style === k ? "selected" : ""}>${v.name}</option>`).join("")}</select></label>
         <label class="small">Size <input id="mm_cols" type="number" value="${sk.cols}" min="5" max="120" style="width:52px">×<input id="mm_rows" type="number" value="${sk.rows}" min="5" max="120" style="width:52px"><button class="small ghost" data-act="mmResize">Apply</button></label>
+        <label class="small">Brush <select id="mm_brush">${[[0.5, "1 square"], [0.75, "1½ squares"], [1, "2 squares"], [1.5, "3 squares"], [2, "4 squares"], [3, "6 squares"]].map(([v, l]) => `<option value="${v}" ${+st.brush === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label class="small">Zoom <input id="mm_zoom" type="range" min="10" max="60" value="${st.cs}" style="width:90px"></label>
         <button class="small ghost" data-act="mmUndo" ${st.undo.length ? "" : "disabled"} title="Undo (Ctrl+Z)">↶ Undo</button><button class="small ghost" data-act="mmRedo" ${st.redo.length ? "" : "disabled"} title="Redo (Ctrl+Y)">↷ Redo</button><button class="small ghost" data-act="mmClear">Clear</button>
         <span class="right row"><button class="ghost" data-act="mmCancel">Cancel</button><button data-act="mmSave">✔ Save map</button></span></div>
+      ${MM_STYLES[sk.style]?.book ? `<div class="mm-top mm-deco small"><b>On the map:</b>${[["title", "Title (the map name)"], ["compass", "Compass rose"], ["scale", "Scale"], ["border", "Paper border"]].map(([k, l]) => `<label><input type="checkbox" data-deco="${k}" ${(sk.deco?.[k] ?? true) ? "checked" : ""}> ${l}</label>`).join("")}
+        <label>Title in the <select id="mm_pos">${[["tl", "top left"], ["tr", "top right"], ["bl", "bottom left"], ["br", "bottom right"]].map(([v, l]) => `<option value="${v}" ${(sk.deco?.pos || "tl") === v ? "selected" : ""}>${l}</option>`).join("")}</select> corner</label></div>` : ""}
       <div class="mm-body"><div class="mm-tools">${tools.map(([k, i, l]) => `<button class="mmt ${st.tool === k ? "on" : ""}" data-act="mmTool" data-k="${k}" title="${l}"><span>${i}</span><small>${l.split(" (")[0]}</small></button>`).join("")}
           <button class="mmt" data-act="mmRot" title="Rotate the next icon (tap a placed icon with the same tool to turn it)"><span style="display:inline-block;transform:rotate(${st.rot * 90}deg)">➜</span><small>Rotate ${st.rot * 90}°</small></button>
           <div class="mm-sep">Icons</div>${MM_ICONS.map(([k, l]) => `<button class="mmt ico ${st.tool === "i:" + k ? "on" : ""}" data-act="mmTool" data-k="i:${k}" title="${l}"><img src="${this.iconImg(k, sk.style)}" alt=""><small>${l}</small></button>`).join("")}</div>
         <div class="mm-canvas" id="mm_wrap"><canvas id="mm_cv"></canvas></div></div>
-      <div class="mm-hint small">${st.tool === "pan" ? "Drag to look around." : st.tool.startsWith("i:") ? "Tap a square to place the icon · tap it again to turn it · ⌫ Erase removes it." : st.tool === "label" ? "Tap a square to write a room number or text · tap a label to change or delete it." : st.tool === "room" ? "Drag a rectangle to carve out a room." : "Drag over squares to paint."}</div>`;
+      <div class="mm-hint small">${st.tool === "pan" ? "Drag to look around." : st.tool.startsWith("i:") ? "Tap a square to place the icon · tap it again to turn it · ⌫ Erase removes it." : st.tool === "label" ? "Tap a square to write a room number or text · tap a label to change or delete it." : st.tool === "room" ? "Drag a rectangle to carve out a room." : st.tool === "cave" ? "Paint freely to carve out caves with natural, uneven walls (brush size at the top)." : st.tool === "wbrush" ? "Paint rivers, streams and pools — the water flows in the direction you paint." : st.tool === "erase" ? "Drag to turn floor back into rock (squares and brush shapes); tap an icon or label to remove it." : "Drag over squares to paint."}</div>`;
     this.paint();
   },
   paint(preview) {
     const st = this.st, cv = document.getElementById("mm_cv"); if (!cv) return;
-    cv.width = st.sk.cols * st.cs; cv.height = st.sk.rows * st.cs;
+    const Mg = this.margin(st.sk); cv.width = (st.sk.cols + 2 * Mg) * st.cs; cv.height = (st.sk.rows + 2 * Mg) * st.cs;
     cv.style.touchAction = st.tool === "pan" ? "auto" : "none";
-    this.draw(cv.getContext("2d"), st.sk, st.cs, { preview });
+    this.draw(cv.getContext("2d"), st.sk, st.cs, { preview, title: st.title, brush: st.hover && this.isBrush() ? { ...st.hover, r: st.brush } : null });
   },
   snap() { const st = this.st; st.undo.push(JSON.stringify(st.sk)); if (st.undo.length > 500) st.undo.shift(); st.redo = []; },
   undo() { const st = this.st, u = st.undo.pop(); if (!u) return; st.redo.push(JSON.stringify(st.sk)); st.sk = JSON.parse(u); this.ui(); },
   redo() { const st = this.st, r = st.redo.pop(); if (!r) return; st.undo.push(JSON.stringify(st.sk)); st.sk = JSON.parse(r); this.ui(); },
-  at(e) { const r = document.getElementById("mm_cv").getBoundingClientRect(); return { x: Math.floor((e.clientX - r.left) / this.st.cs), y: Math.floor((e.clientY - r.top) / this.st.cs) }; },
+  atF(e) { const r = document.getElementById("mm_cv").getBoundingClientRect(), Mg = this.margin(this.st.sk); return { x: (e.clientX - r.left) / this.st.cs - Mg, y: (e.clientY - r.top) / this.st.cs - Mg }; },
+  at(e) { const p = this.atF(e); return { x: Math.floor(p.x), y: Math.floor(p.y) }; },
+  isBrush() { const t = this.st.tool; return t === "cave" || t === "wbrush" || (t === "erase" && (this.st.sk.strokes || []).length); },
+  brushStart(k, p) { const s = { k, r: +this.st.brush || 1, seed: Math.floor(Math.random() * 1e6), pts: [[+p.x.toFixed(2), +p.y.toFixed(2)]] }; (this.st.sk.strokes ||= []).push(s); this.drag.stroke = s; },
+  brushTo(p) { const s = this.drag.stroke; if (!s) return; const l = s.pts[s.pts.length - 1]; if (Math.hypot(p.x - l[0], p.y - l[1]) < 0.18) return; s.pts.push([+p.x.toFixed(2), +p.y.toFixed(2)]); },
   apply(p) {
     const st = this.st, sk = st.sk, t = st.tool;
     if (t === "floor") this.setCell(sk, p.x, p.y, "1");
@@ -172,9 +182,12 @@ const MM = {
   },
   down(e) {
     const st = this.st; if (!st || st.tool === "pan") return;
-    const p = this.at(e); if (p.x < 0 || p.y < 0 || p.x >= st.sk.cols || p.y >= st.sk.rows) return;
+    const p = this.at(e), pf = this.atF(e);
+    const brush = st.tool === "cave" || st.tool === "wbrush";
+    if (!brush && (p.x < 0 || p.y < 0 || p.x >= st.sk.cols || p.y >= st.sk.rows)) return;
     e.preventDefault(); e.target.setPointerCapture?.(e.pointerId);
     this.snap();
+    if (brush) { this.drag = { start: p, last: p }; this.brushStart(st.tool === "cave" ? "cave" : "water", pf); this.paint(); return; }
     if (st.tool.startsWith("i:")) {
       const t = st.tool.slice(2), ex = st.sk.items.find(i => i.x === p.x && i.y === p.y);
       if (ex && ex.t === t) ex.r = ((ex.r || 0) + 1) % 4; else { st.sk.items = st.sk.items.filter(i => i !== ex); let r = st.rot;
@@ -191,17 +204,19 @@ const MM = {
       this.ui(); return;
     }
     this.drag = { start: p, last: p };
+    if (st.tool === "erase" && (st.sk.strokes || []).some(s => s.k !== "erase")) this.brushStart("erase", pf);
     if (st.tool !== "room") { this.apply(p); this.paint(); }
     else this.paint({ x: p.x, y: p.y, w: 1, h: 1 });
   },
   move(e) {
-    const d = this.drag; if (!d) return; const p = this.at(e); if (p.x === d.last.x && p.y === d.last.y) return;
-    const st = this.st;
+    const d = this.drag; if (!d) return; const st = this.st;
+    if (d.stroke) { this.brushTo(this.atF(e)); st.hover = this.atF(e); if (st.tool !== "erase") return this.paintSoon(); }
+    const p = this.at(e); if (p.x === d.last.x && p.y === d.last.y) return d.stroke && this.paintSoon();
     if (st.tool === "room") { const x = Math.min(d.start.x, p.x), y = Math.min(d.start.y, p.y); this.paint({ x, y, w: Math.abs(p.x - d.start.x) + 1, h: Math.abs(p.y - d.start.y) + 1 }); }
     else { // fill the gap between pointer samples
       const n = Math.max(Math.abs(p.x - d.last.x), Math.abs(p.y - d.last.y));
       for (let k = 1; k <= n; k++) this.apply({ x: Math.round(d.last.x + (p.x - d.last.x) * k / n), y: Math.round(d.last.y + (p.y - d.last.y) * k / n) });
-      this.paint();
+      this.paintSoon();
     }
     d.last = p;
   },
@@ -211,15 +226,19 @@ const MM = {
       for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (this.cell(st.sk, x, y) === "0") this.setCell(st.sk, x, y, "1"); }
     this.ui();
   },
+  paintSoon() { if (this._raf) return; this._raf = requestAnimationFrame(() => { this._raf = null; this.paint(); }); },
   close() { this.st = null; document.getElementById("mm")?.classList.add("hidden"); document.body.classList.remove("mm-open"); }
 };
 document.addEventListener("pointerdown", e => { if (e.target.id === "mm_cv") MM.down(e); });
-document.addEventListener("pointermove", e => { if (MM.drag) MM.move(e); });
+document.addEventListener("pointermove", e => { if (MM.drag) return MM.move(e); if (MM.st && e.target.id === "mm_cv" && MM.isBrush()) { MM.st.hover = MM.atF(e); MM.paintSoon(); } });
 document.addEventListener("pointerup", e => { if (MM.drag) MM.up(e); });
 document.addEventListener("change", e => {
   if (!MM.st) return;
-  if (e.target.id === "mm_style") { MM.st.sk.style = e.target.value; MM.ui(); }
-  if (e.target.id === "mm_title") MM.st.title = e.target.value;
+  if (e.target.id === "mm_style") { MM.st.sk.style = e.target.value; MM.st.sk.deco ||= { border: true, title: true, compass: true, scale: true, pos: "tl" }; MM.ui(); }
+  if (e.target.id === "mm_brush") { MM.st.brush = +e.target.value; }
+  if (e.target.dataset.deco) { MM.snap(); (MM.st.sk.deco ||= {})[e.target.dataset.deco] = e.target.checked; MM.ui(); }
+  if (e.target.id === "mm_pos") { MM.snap(); (MM.st.sk.deco ||= {}).pos = e.target.value; MM.ui(); }
+  if (e.target.id === "mm_title") { MM.st.title = e.target.value; MM.paint(); }
 });
 // Ctrl+Z undo, Ctrl+Y (or Ctrl+Shift+Z) redo while the map maker is open
 document.addEventListener("keydown", e => {
@@ -237,25 +256,28 @@ Object.assign(ACT, {
   mmRot: () => { MM.st.rot = (MM.st.rot + 1) % 4; MM.ui(); },
   mmUndo: () => MM.undo(),
   mmRedo: () => MM.redo(),
-  mmClear: () => { if (!confirm("Clear the whole drawing?")) return; MM.snap(); const s = MM.st.sk; Object.assign(s, MM.blank(s.cols, s.rows), { style: s.style }); MM.ui(); },
+  mmClear: () => { if (!confirm("Clear the whole drawing?")) return; MM.snap(); const s = MM.st.sk; Object.assign(s, MM.blank(s.cols, s.rows), { style: s.style, deco: s.deco }); MM.ui(); },
   mmResize: () => { const s = MM.st.sk, c = Math.max(5, Math.min(120, +$("#mm_cols").value || s.cols)), r = Math.max(5, Math.min(120, +$("#mm_rows").value || s.rows)); MM.snap();
     let cells = ""; for (let y = 0; y < r; y++) for (let x = 0; x < c; x++) cells += MM.cell(s, x, y);
     Object.assign(s, { cols: c, rows: r, cells, items: s.items.filter(i => i.x < c && i.y < r), labels: s.labels.filter(l => l.x < c && l.y < r) }); MM.ui(); },
   mmCancel: () => { const st = MM.st; if (st.undo.length && !confirm("Close without saving the changes?")) return;
     if (st.isNew) { if (st.target.kind === "block") S.scen.blocks = S.scen.blocks.filter(b => b.id !== st.target.id); else S.scen.battlemaps = S.scen.battlemaps.filter(b => b.id !== st.target.id); }
     MM.close(); render(); },
-  mmSave: () => {
+  mmSave: async () => {
     const st = MM.st; st.title = $("#mm_title")?.value || st.title;
-    const cs = st.target.kind === "map" ? 70 : 40, cv = MM.render(st.sk, cs), image = cv.toDataURL("image/png"), thumb = mmThumb(cv);
+    try { await Promise.race([document.fonts.load(`700 40px ${MM_FONT}`), new Promise(r => setTimeout(r, 1500))]); } catch (e) { }
+    (st.sk.deco ||= {}).text = st.title;
+    const book = MM_STYLES[st.sk.style]?.book, cs = st.target.kind === "map" ? (book ? 60 : 70) : 40, cv = MM.render(st.sk, cs, st.title), image = book ? cv.toDataURL("image/webp", 0.9) : cv.toDataURL("image/png"), thumb = mmThumb(cv);
+    const Mg = MM.margin(st.sk);
     const t = mmTarget(st.target); if (!t) return MM.close();
     if (st.target.kind === "block") { t.sketch = st.sk; t.map = { image, w: cv.width, h: cv.height }; t.thumb = thumb; if (st.title) t.title = st.title; (S.ui.z ||= {})[t.id] = null; }
     else { t.sketch = st.sk; Object.assign(t, { image, thumb, w: cv.width, h: cv.height }); if (st.title) t.name = st.title;
-      t.grid = { ...(t.grid || {}), cols: st.sk.cols, rows: st.sk.rows, ox: 0, oy: 0, show: false }; S.ui.bmZ = null; }
+      t.grid = { ...(t.grid || {}), cols: st.sk.cols + 2 * Mg, rows: st.sk.rows + 2 * Mg, ox: 0, oy: 0, show: false }; S.ui.bmZ = null; }
     MM.close(); save(); render(); if (st.target.kind === "map") pushTable?.(true); toast("Map saved");
   },
   drawBlock: el => { const at = +el.dataset.at, b = { id: "m" + uid(), type: "map", title: "", map: null, sketch: MM.blank() };
     S.scen.blocks.splice(at, 0, b); MM.open({ kind: "block", id: b.id }, b.sketch, ""); MM.st.isNew = true; },
-  drawMap: () => { const sk = MM.blank(30, 22), b = { id: uid(), name: "Drawn map", image: "", thumb: "", w: 0, h: 0, grid: { cols: 30, rows: 22, ox: 0, oy: 0, show: false, color: "#000000", opacity: 0.35 }, tokens: [], sketch: sk };
+  drawMap: () => { const sk = MM.blank(30, 22), b = { id: uid(), name: "Drawn map", image: "", thumb: "", w: 0, h: 0, grid: { cols: 34, rows: 26, ox: 0, oy: 0, show: false, color: "#000000", opacity: 0.35 }, tokens: [], sketch: sk };
     S.scen.battlemaps.push(b); MM.open({ kind: "map", id: b.id }, sk, "Drawn map"); MM.st.isNew = true; },
   editDrawing: el => { const kind = el.dataset.k, t = kind === "block" ? S.scen.blocks.find(b => b.id === el.dataset.id) : S.scen.battlemaps.find(b => b.id === el.dataset.id); if (!t?.sketch) return;
     MM.open({ kind, id: t.id }, t.sketch, t.title || t.name || ""); }

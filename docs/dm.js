@@ -960,7 +960,7 @@ function bindBattlemap() {
   }, id => { S.ui.selTok = S.ui.selTok === id ? null : id; render(); }, mapExtras(() => curMap(), () => drawBattlemap()));
 }
 
-const APP_VERSION = "2026-11-02e";
+const APP_VERSION = "2026-11-02f";
 async function init() {
   try { const t = localStorage.getItem("dmtheme"); if (t) document.documentElement.dataset.theme = t; } catch (e) { }
   await Sync.init();

@@ -1,7 +1,7 @@
 // DM Tool offline cache. Cache names start with "dm-" so the Character Builder (same website) leaves them alone.
-const VERSION = "dm-v10";
+const VERSION = "dm-v11";
 const IMG = "dm-img";   // monster pictures from aidedd.org, kept for offline use
-const FILES = ["./", "index.html", "config.js", "dm.css", "qr.js", "mapview.js", "names.js", "dmstore.js", "dm.js", "loot.js", "dice.js", "spells.js", "combat.js", "mapmaker.js", "extras.js", "maptools.js", "myitems.js", "share.js", "live.js", "manifest.json", "icon-192.png", "icon-512.png"];
+const FILES = ["./", "index.html", "config.js", "dm.css", "qr.js", "mapview.js", "names.js", "dmstore.js", "dm.js", "loot.js", "dice.js", "spells.js", "combat.js", "mapmaker.js", "mapstyle.js", "extras.js", "maptools.js", "myitems.js", "share.js", "live.js", "manifest.json", "icon-192.png", "icon-512.png"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(VERSION).then(c => Promise.all(FILES.map(f => fetch(f, { cache: "no-cache" }).then(r => r.ok && c.put(f, r)).catch(() => { })))).then(() => self.skipWaiting()));
 });
