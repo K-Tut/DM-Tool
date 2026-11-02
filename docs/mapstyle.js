@@ -5,6 +5,15 @@
    a compass rose and the scale. Strokes are stored in the sketch: sk.strokes = [{k:"cave"|"water"|"erase", r, seed, pts:[[x,y],…]}] (in squares). */
 MM_STYLES.book = { name: "Dungeon book (stone & water)", book: true, rock: "#4a5260", floor: "#d4d2cd", grid: "rgba(38,42,50,.30)", wall: "#141414", water: "#6f97bf", wave: "#eaf3fb", ink: "#1e1e1e", label: "#1e1e1e" };
 const MM_FONT = "Cinzel, 'Cinzel Decorative', Georgia, 'Times New Roman', serif";
+// fonts for the title and labels (free Google fonts; plain serif when offline)
+const MM_FONTS = {
+  pirata: { name: "Blackletter (old map)", css: "'Pirata One', 'UnifrakturMaguntia', Georgia, serif", w: 400, sx: 1, caps: false },
+  grenze: { name: "Gothic, bold", css: "'Grenze Gotisch', 'Pirata One', Georgia, serif", w: 700, sx: 1, caps: false },
+  fraktur: { name: "Fraktur (ornate)", css: "'UnifrakturMaguntia', 'Pirata One', Georgia, serif", w: 400, sx: 1, caps: false },
+  medieval: { name: "Medieval hand", css: "'MedievalSharp', Georgia, serif", w: 400, sx: 1, caps: false },
+  cinzel: { name: "Book capitals", css: MM_FONT, w: 700, sx: 0.78, caps: true }
+};
+function mmFont(sk) { return MM_FONTS[sk.deco?.font] || MM_FONTS.pirata; }
 const MM_TEX = new Map();
 function mmRand(seed) { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return ((s >>> 0) % 100000) / 100000; }; }
 function mmCanvas(w, h) { const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(h)); return c; }
@@ -13,14 +22,14 @@ Object.assign(MM, {
   useMask(sk) { return MM_STYLES[sk.style]?.book || (sk.strokes || []).some(s => s.k !== "erase"); },
   // brush stroke as overlapping circles; caves get lumpy edges, water stays smooth
   stamp(cx, s, cs, off) {
-    const r = mmRand(s.seed || 7), pts = s.pts || [], R = (+s.r || 1) * cs, lumpy = s.k === "cave";
+    const r = mmRand(s.seed || 7), pts = s.pts || [], R = (+s.r || 1) * cs, lumpy = s.k === "cave" || s.k === "pit";
     const dot = (x, y, rr) => { cx.moveTo(x + rr, y); cx.arc(x, y, Math.max(1, rr), 0, Math.PI * 2); };
-    const rock = (x, y, rr) => { const n = 7 + Math.floor(r() * 4), a0 = r() * 6.3; for (let k = 0; k <= n; k++) { const a = a0 + k / n * Math.PI * 2, q = rr * (0.72 + 0.42 * r()); k ? cx.lineTo(x + Math.cos(a) * q, y + Math.sin(a) * q) : cx.moveTo(x + Math.cos(a) * q, y + Math.sin(a) * q); } cx.closePath(); };
+    const rock = (x, y, rr) => { const pit = s.k === "pit", n = (pit ? 11 : 7) + Math.floor(r() * 4), a0 = r() * 6.3; for (let k = 0; k <= n; k++) { const a = a0 + k / n * Math.PI * 2, q = rr * (pit ? 0.86 + 0.22 * r() : 0.72 + 0.42 * r()); k ? cx.lineTo(x + Math.cos(a) * q, y + Math.sin(a) * q) : cx.moveTo(x + Math.cos(a) * q, y + Math.sin(a) * q); } cx.closePath(); };
     cx.beginPath();
     for (let i = 0; i < pts.length; i++) {
       const a = pts[i], b = pts[i + 1] || a, d = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.ceil(d / 0.2));
       for (let k = 0; k < n; k++) {
-        if (lumpy && k % 2) continue;
+        if (lumpy && k % 2 && s.k !== "pit") continue;
         const t = k / n, x = off + (a[0] + (b[0] - a[0]) * t) * cs, y = off + (a[1] + (b[1] - a[1]) * t) * cs;
         if (lumpy) { rock(x, y, R * (0.85 + 0.2 * r())); if (r() < 0.35) { const ang = r() * Math.PI * 2, dd = R * (0.6 + 0.35 * r()); rock(x + Math.cos(ang) * dd, y + Math.sin(ang) * dd, R * (0.22 + 0.25 * r())); } }
         else dot(x, y, R * (s.k === "water" ? 0.94 + 0.1 * r() : 1));
@@ -29,16 +38,16 @@ Object.assign(MM, {
     cx.fill();
   },
   buildMasks(sk, cs, W, H, off) {
-    const M = mmCanvas(W, H), Wm = mmCanvas(W, H), m = M.getContext("2d"), w = Wm.getContext("2d");
-    m.fillStyle = w.fillStyle = "#000";
+    const M = mmCanvas(W, H), Wm = mmCanvas(W, H), Pm = mmCanvas(W, H), m = M.getContext("2d"), w = Wm.getContext("2d"), p = Pm.getContext("2d");
+    m.fillStyle = w.fillStyle = p.fillStyle = "#000";
     for (let y = 0; y < sk.rows; y++) for (let x = 0; x < sk.cols; x++) { const v = this.cell(sk, x, y); if (v === "0") continue;
       m.fillRect(off + x * cs - 0.5, off + y * cs - 0.5, cs + 1, cs + 1); if (v === "2") w.fillRect(off + x * cs - 0.5, off + y * cs - 0.5, cs + 1, cs + 1); }
     for (const s of sk.strokes || []) {
-      if (s.k === "erase") { m.globalCompositeOperation = w.globalCompositeOperation = "destination-out"; this.stamp(m, s, cs, off); this.stamp(w, s, cs, off); m.globalCompositeOperation = w.globalCompositeOperation = "source-over"; }
-      else { this.stamp(m, s, cs, off); if (s.k === "water") this.stamp(w, s, cs, off); }
+      if (s.k === "erase") { m.globalCompositeOperation = w.globalCompositeOperation = p.globalCompositeOperation = "destination-out"; this.stamp(m, s, cs, off); this.stamp(w, s, cs, off); this.stamp(p, s, cs, off); m.globalCompositeOperation = w.globalCompositeOperation = p.globalCompositeOperation = "source-over"; }
+      else { this.stamp(m, s, cs, off); if (s.k === "water" || s.k === "foam") this.stamp(w, s, cs, off); if (s.k === "pit") this.stamp(p, s, cs, off); }
     }
     w.globalCompositeOperation = "destination-in"; w.drawImage(M, 0, 0); w.globalCompositeOperation = "source-over";
-    return { M, Wm };
+    return { M, Wm, Pm };
   },
   tint(src, color) { const c = mmCanvas(src.width, src.height), x = c.getContext("2d"); x.drawImage(src, 0, 0); x.globalCompositeOperation = "source-in"; x.fillStyle = color; x.fillRect(0, 0, c.width, c.height); return c; },
   dilate(cx, src, rad) { const n = 16; for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2; cx.drawImage(src, Math.cos(a) * rad, Math.sin(a) * rad); } cx.drawImage(src, 0, 0); },
@@ -74,7 +83,7 @@ Object.assign(MM, {
   // ---------- the whole picture ----------
   drawMask(cx, sk, cs, opt = {}) {
     const T = MM_STYLES[sk.style] || MM_STYLES.book, Mg = this.margin(sk), off = Mg * cs, W = (sk.cols + 2 * Mg) * cs, H = (sk.rows + 2 * Mg) * cs;
-    const { M, Wm } = this.buildMasks(sk, cs, W, H, off), wallW = Math.max(2, cs * 0.13);
+    const { M, Wm, Pm } = this.buildMasks(sk, cs, W, H, off), wallW = Math.max(2, cs * 0.13);
     cx.save(); cx.clearRect(0, 0, W, H);
     cx.drawImage(this.rockTex(W, H, cs, T), 0, 0);
     // walls: the floor shape grown a little, in black (works for squares and free shapes alike)
@@ -86,7 +95,7 @@ Object.assign(MM, {
     const rr = mmRand(99); l.fillStyle = T.book ? "rgba(70,66,60,.55)" : T.ink;
     for (let y = 0; y < sk.rows; y++) for (let x = 0; x < sk.cols; x++) if (this.cell(sk, x, y) === "3") for (let k = 0; k < 7; k++) { l.beginPath(); l.arc(off + (x + 0.12 + 0.76 * rr()) * cs, off + (y + 0.12 + 0.76 * rr()) * cs, cs * (0.04 + 0.06 * rr()), 0, 7); l.fill(); }
     // water: dark bank, blue body with soft depth, white flow streaks
-    if (sk.strokes?.some(s => s.k === "water") || sk.cells.includes("2")) {
+    if (sk.strokes?.some(s => s.k === "water" || s.k === "foam") || sk.cells.includes("2")) {
       const Wl = mmCanvas(W, H), w = Wl.getContext("2d");
       this.dilate(l, this.tint(Wm, T.book ? "rgba(40,62,88,.85)" : T.wave), Math.max(1.5, cs * 0.06));
       const g = w.createLinearGradient(0, 0, W, H); g.addColorStop(0, T.water); g.addColorStop(0.5, T.book ? "#5f88b2" : T.water); g.addColorStop(1, T.water);
@@ -98,6 +107,14 @@ Object.assign(MM, {
         for (let j = -1.5; j <= 1.5; j += 1) { w.globalAlpha = 0.16 + 0.22 * r3(); w.lineWidth = Math.max(1, cs * (0.035 + 0.05 * r3())); w.setLineDash([cs * (1.6 + r3() * 2.4), cs * (0.8 + r3() * 1.6)]); w.lineDashOffset = r3() * cs * 3;
           w.beginPath(); s.pts.forEach((p, i) => { const q = s.pts[Math.min(i + 1, s.pts.length - 1)], pp = s.pts[Math.max(i - 1, 0)], dx = q[0] - pp[0], dy = q[1] - pp[1], dl = Math.hypot(dx, dy) || 1;
             const o = j * (+s.r || 1) * 0.36, X = off + (p[0] - dy / dl * o) * cs, Y = off + (p[1] + dx / dl * o) * cs; i ? w.lineTo(X, Y) : w.moveTo(X, Y); }); w.stroke(); } }
+      // rapids / foam: white churn along foam strokes
+      for (const s of sk.strokes || []) { if (s.k !== "foam") continue; const r4 = mmRand((s.seed || 5) + 23), R = (+s.r || 1) * cs, pts = s.pts || [];
+        w.setLineDash([]); w.globalAlpha = 1;
+        for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[Math.min(i + 1, pts.length - 1)], X = off + p[0] * cs, Y = off + p[1] * cs, ang = Math.atan2(q[1] - p[1], q[0] - p[0]);
+          const g = w.createRadialGradient(X, Y, 0, X, Y, R); g.addColorStop(0, "rgba(235,244,252,.55)"); g.addColorStop(1, "rgba(235,244,252,0)"); w.fillStyle = g; w.fillRect(X - R, Y - R, 2 * R, 2 * R);
+          for (let k = 0; k < 6; k++) { const ox = (r4() - 0.5) * 1.6 * R, oy = (r4() - 0.5) * 1.6 * R; w.strokeStyle = `rgba(255,255,255,${0.45 + 0.4 * r4()})`; w.lineWidth = Math.max(1, cs * (0.03 + 0.05 * r4()));
+            w.beginPath(); w.ellipse(X + ox, Y + oy, cs * (0.15 + 0.35 * r4()), cs * (0.05 + 0.1 * r4()), ang + (r4() - 0.5) * 0.6, Math.PI * (0.1 + r4() * 0.3), Math.PI * (1.2 + r4() * 0.6)); w.stroke(); }
+          w.fillStyle = "rgba(255,255,255,.7)"; for (let k = 0; k < 4; k++) { w.beginPath(); w.arc(X + (r4() - 0.5) * 1.6 * R, Y + (r4() - 0.5) * 1.6 * R, cs * (0.02 + 0.04 * r4()), 0, 7); w.fill(); } } }
       w.setLineDash([]); w.globalAlpha = 0.35; w.lineWidth = Math.max(1, cs * 0.05);   // ripples on painted water squares
       for (let y = 0; y < sk.rows; y++) for (let x = 0; x < sk.cols; x++) if (this.cell(sk, x, y) === "2") for (const k of [0.35, 0.7]) { w.beginPath(); const px = off + x * cs, py = off + y * cs; w.moveTo(px + cs * 0.15, py + cs * k); w.quadraticCurveTo(px + cs * 0.35, py + cs * (k - 0.1), px + cs * 0.55, py + cs * k); w.quadraticCurveTo(px + cs * 0.75, py + cs * (k + 0.1), px + cs * 0.9, py + cs * k); w.stroke(); }
       w.globalAlpha = 1;
@@ -114,13 +131,26 @@ Object.assign(MM, {
     // soft shadow along the walls
     if (T.book && this.canBlur) { const sh = mmCanvas(W, H), s2 = sh.getContext("2d"); s2.fillStyle = "#000"; s2.fillRect(0, 0, W, H); s2.globalCompositeOperation = "destination-out"; s2.drawImage(M, 0, 0);
       l.save(); l.filter = `blur(${cs * 0.4}px)`; l.globalAlpha = 0.42; l.drawImage(sh, 0, 0); l.restore(); }
+    // chasms / pits: a dark rim and a hole that gets darker towards the middle, with streaks falling in
+    if ((sk.strokes || []).some(s => s.k === "pit")) {
+      this.dilate(l, this.tint(Pm, "#16171a"), Math.max(1.5, cs * 0.07));
+      const P = mmCanvas(W, H), p = P.getContext("2d"); p.fillStyle = T.book ? "#5c6068" : "#444"; p.fillRect(0, 0, W, H);
+      for (const s of sk.strokes) { if (s.k !== "pit") continue;
+        [[0.85, "#43464d"], [0.65, "#2c2e33"], [0.45, "#18191c"], [0.25, "#060607"]].forEach(([f, col]) => { p.save(); if (this.canBlur) p.filter = `blur(${cs * 0.35}px)`; p.fillStyle = col; this.stamp(p, { ...s, k: "water", r: (+s.r || 1) * f }, cs, off); p.restore(); });
+        const r5 = mmRand((s.seed || 9) + 41), R = (+s.r || 1) * cs; p.strokeStyle = "rgba(10,10,12,.35)"; p.lineCap = "round";
+        (s.pts || []).forEach((pt, i) => { if (i % 2) return; const X = off + pt[0] * cs, Y = off + pt[1] * cs;
+          for (let k = 0; k < 5; k++) { const a = r5() * Math.PI * 2, d1 = R * (0.95 + 0.2 * r5()), d2 = R * (0.25 + 0.2 * r5()); p.lineWidth = Math.max(1, cs * (0.03 + 0.05 * r5()));
+            p.beginPath(); p.moveTo(X + Math.cos(a) * d1, Y + Math.sin(a) * d1); p.lineTo(X + Math.cos(a) * d2, Y + Math.sin(a) * d2); p.stroke(); } }); }
+      p.globalCompositeOperation = "destination-in"; p.drawImage(Pm, 0, 0);
+      l.globalCompositeOperation = "source-over"; l.drawImage(P, 0, 0);
+    }
     l.globalCompositeOperation = "destination-in"; l.drawImage(M, 0, 0);
     cx.drawImage(L, 0, 0);
     // icons and labels
     cx.translate(off, off);
     (sk.items || []).forEach(it => this.icon(cx, it.t, (it.x + .5) * cs, (it.y + .5) * cs, cs, it.r || 0, T));
     cx.textAlign = "center"; cx.textBaseline = "middle";
-    (sk.labels || []).forEach(lb => { const big = /^\d{1,3}$/.test(lb.text); cx.font = `${big ? 700 : 700} ${cs * (big ? .6 : .42)}px ${T.book ? MM_FONT : "Georgia, serif"}`;
+    (sk.labels || []).forEach(lb => { const big = /^\d{1,3}$/.test(lb.text); const F = mmFont(sk); cx.font = `${F.w} ${cs * (big ? .66 : .5)}px ${T.book ? F.css : "Georgia, serif"}`;
       cx.lineWidth = cs / 8; cx.strokeStyle = T.book ? "rgba(255,255,255,.85)" : T.floor; cx.strokeText(lb.text, (lb.x + .5) * cs, (lb.y + .55) * cs); cx.fillStyle = T.label; cx.fillText(lb.text, (lb.x + .5) * cs, (lb.y + .55) * cs); });
     if (opt.preview) { const p = opt.preview; cx.strokeStyle = "#e0a100"; cx.lineWidth = 3; cx.setLineDash([6, 4]); cx.strokeRect(p.x * cs, p.y * cs, p.w * cs, p.h * cs); cx.setLineDash([]); }
     if (opt.brush) { cx.strokeStyle = "rgba(224,161,0,.9)"; cx.lineWidth = 2; cx.beginPath(); cx.arc(opt.brush.x * cs, opt.brush.y * cs, opt.brush.r * cs, 0, 7); cx.stroke(); }
@@ -153,14 +183,14 @@ Object.assign(MM, {
     const pad = Mg * cs + cs * 0.4, corners = { tl: [pad, pad], tr: [W - pad, pad], bl: [pad, H - pad], br: [W - pad, H - pad] };
     const tpos = corners[d.pos] ? d.pos : "tl", opp = { tl: "tr", tr: "tl", bl: "br", br: "bl" }[tpos];
     const txt = String(title || d.text || "").trim();
-    if (d.title && txt) {   // tall, condensed capitals with small caps, white with a soft shadow
-      const size = cs * 1.15, [x0, y0] = corners[tpos], right = tpos.endsWith("r"), bottom = tpos.startsWith("b");
-      const words = txt.toUpperCase().split(/\s+/), parts = [];
-      words.forEach((w, i) => { parts.push([w[0], size]); if (w.length > 1) parts.push([w.slice(1), size * 0.78]); if (i < words.length - 1) parts.push([" ", size * 0.6]); });
-      cx.save(); const sx = 0.78; let tw = 0; parts.forEach(([s, z]) => { cx.font = `700 ${z}px ${MM_FONT}`; tw += cx.measureText(s).width; }); tw *= sx;
+    if (d.title && txt) {   // white title with a soft shadow, in the chosen font
+      const F = mmFont(sk), size = cs * (F.caps ? 1.15 : 1.35), [x0, y0] = corners[tpos], right = tpos.endsWith("r"), bottom = tpos.startsWith("b"), parts = [];
+      if (F.caps) txt.toUpperCase().split(/\s+/).forEach((w, i, all) => { parts.push([w[0], size]); if (w.length > 1) parts.push([w.slice(1), size * 0.78]); if (i < all.length - 1) parts.push([" ", size * 0.6]); });
+      else parts.push([txt, size]);
+      cx.save(); const sx = F.sx; let tw = 0; parts.forEach(([s, z]) => { cx.font = `${F.w} ${z}px ${F.css}`; tw += cx.measureText(s).width; }); tw *= sx;
       let x = right ? x0 - tw : x0; const base = bottom ? y0 - cs * 0.2 : y0 + size * 0.85;
       cx.shadowColor = "rgba(0,0,0,.75)"; cx.shadowBlur = cs * 0.25; cx.shadowOffsetY = cs * 0.05; cx.fillStyle = "#fbfbfa"; cx.textBaseline = "alphabetic"; cx.textAlign = "left";
-      parts.forEach(([s, z]) => { cx.font = `700 ${z}px ${MM_FONT}`; const wd = cx.measureText(s).width; cx.save(); cx.translate(x, base); cx.scale(sx, 1); cx.font = `700 ${z}px ${MM_FONT}`; cx.fillText(s, 0, 0); cx.restore(); x += wd * sx; });
+      parts.forEach(([s, z]) => { cx.font = `${F.w} ${z}px ${F.css}`; const wd = cx.measureText(s).width; cx.save(); cx.translate(x, base); cx.scale(sx, 1); cx.font = `${F.w} ${z}px ${F.css}`; cx.fillText(s, 0, 0); cx.restore(); x += wd * sx; });
       cx.restore();
     }
     if (d.compass) this.compass(cx, ...corners[opp].map((v, i) => v + (i === 0 ? (opp.endsWith("r") ? -1 : 1) : (opp.startsWith("b") ? -1 : 1)) * cs * 1.3), cs * 1.25);
@@ -181,4 +211,4 @@ Object.assign(MM, {
   }
 });
 // fonts for titles (Cinzel from Google Fonts; plain serif when offline)
-(function loadMapFont() { if (document.getElementById("mmfont")) return; const l = document.createElement("link"); l.id = "mmfont"; l.rel = "stylesheet"; l.href = "https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap"; document.head.appendChild(l); })();
+(function loadMapFont() { if (document.getElementById("mmfont")) return; const l = document.createElement("link"); l.id = "mmfont"; l.rel = "stylesheet"; l.href = "https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Pirata+One&family=Grenze+Gotisch:wght@600;700&family=UnifrakturMaguntia&family=MedievalSharp&display=swap"; document.head.appendChild(l); })();

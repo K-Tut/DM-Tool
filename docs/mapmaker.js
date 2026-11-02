@@ -17,7 +17,7 @@ const MM_ICONS = [
 ];
 const MM = {
   st: null,   // {target:{kind,id}, sk, tool, rot, cs, undo:[], title}
-  blank(cols = 36, rows = 26) { return { cols, rows, cells: "0".repeat(cols * rows), items: [], labels: [], strokes: [], style: "book", deco: { border: true, title: true, compass: true, scale: true, pos: "tl" } }; },
+  blank(cols = 36, rows = 26) { return { cols, rows, cells: "0".repeat(cols * rows), items: [], labels: [], strokes: [], style: "book", deco: { border: true, title: true, compass: true, scale: true, pos: "tl", font: "pirata" } }; },
   cell(sk, x, y) { return x < 0 || y < 0 || x >= sk.cols || y >= sk.rows ? "0" : sk.cells[y * sk.cols + x]; },
   setCell(sk, x, y, v) { if (x < 0 || y < 0 || x >= sk.cols || y >= sk.rows) return; const i = y * sk.cols + x; sk.cells = sk.cells.slice(0, i) + v + sk.cells.slice(i + 1); },
 
@@ -132,13 +132,13 @@ const MM = {
   open(target, sk, title) {
     const k = clone(sk); k.strokes ||= [];
     this.st = { target, sk: k, tool: "room", rot: 0, brush: 1, cs: Math.max(18, Math.min(34, Math.floor((Math.min(window.innerWidth, 1400) - 40) / (sk.cols + 4)))), undo: [], redo: [], title: title || "" };
-    try { document.fonts && document.fonts.load(`700 40px ${MM_FONT}`).then(() => this.st && this.paint()); } catch (e) { }
+    try { const F = mmFont(k); document.fonts && Promise.all([document.fonts.load(`${F.w} 40px ${F.css}`), document.fonts.load(`700 40px ${MM_FONT}`)]).then(() => this.st && this.paint()); } catch (e) { }
     let el = document.getElementById("mm"); if (!el) { el = document.createElement("div"); el.id = "mm"; document.body.appendChild(el); }
     el.classList.remove("hidden"); document.body.classList.add("mm-open"); this.ui();
   },
   ui() {
     const st = this.st, sk = st.sk, el = document.getElementById("mm");
-    const tools = [["room", "▭", "Room (drag a rectangle)"], ["floor", "🖌", "Floor / corridor (paint)"], ["cave", "🪨", "Cave brush (free shapes)"], ["wbrush", "🌊", "Water brush (rivers, pools)"], ["erase", '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M14.5 3.5l6 6-9.5 9.5H6l-3-3z"/><path d="M9.5 8.5l6 6" /><path d="M3 16l3 3" /><path d="M11 19h9" stroke-linecap="round"/><path d="M14.5 3.5l6 6-5 5-6-6z" fill="currentColor" opacity=".35"/></svg>', "Eraser (back to rock, removes icons)"], ["water", "≈", "Water squares"], ["rubble", "∴", "Rubble floor"], ["label", "1", "Number or text"], ["pan", "✋", "Scroll / move around"]];
+    const tools = [["room", "▭", "Room (drag a rectangle)"], ["floor", "🖌", "Floor / corridor (paint)"], ["cave", "🪨", "Cave brush (free shapes)"], ["wbrush", "🌊", "Water brush (rivers, pools)"], ["foam", "〰", "Rapids / foam (white water)"], ["pit", "🕳", "Chasm / pit (dark hole)"], ["erase", '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M14.5 3.5l6 6-9.5 9.5H6l-3-3z"/><path d="M9.5 8.5l6 6" /><path d="M3 16l3 3" /><path d="M11 19h9" stroke-linecap="round"/><path d="M14.5 3.5l6 6-5 5-6-6z" fill="currentColor" opacity=".35"/></svg>', "Eraser (back to rock, removes icons)"], ["water", "≈", "Water squares"], ["rubble", "∴", "Rubble floor"], ["label", "1", "Number or text"], ["pan", "✋", "Scroll / move around"]];
     el.innerHTML = `<div class="mm-top"><b>✏ Map maker</b><input id="mm_title" value="${esc(st.title)}" placeholder="Map name" style="width:160px">
         <label class="small">Style <select id="mm_style">${Object.entries(MM_STYLES).map(([k, v]) => `<option value="${k}" ${sk.style === k ? "selected" : ""}>${v.name}</option>`).join("")}</select></label>
         <label class="small">Size <input id="mm_cols" type="number" value="${sk.cols}" min="5" max="120" style="width:52px">×<input id="mm_rows" type="number" value="${sk.rows}" min="5" max="120" style="width:52px"><button class="small ghost" data-act="mmResize">Apply</button></label>
@@ -147,12 +147,13 @@ const MM = {
         <button class="small ghost" data-act="mmUndo" ${st.undo.length ? "" : "disabled"} title="Undo (Ctrl+Z)">↶ Undo</button><button class="small ghost" data-act="mmRedo" ${st.redo.length ? "" : "disabled"} title="Redo (Ctrl+Y)">↷ Redo</button><button class="small ghost" data-act="mmClear">Clear</button>
         <span class="right row"><button class="ghost" data-act="mmCancel">Cancel</button><button data-act="mmSave">✔ Save map</button></span></div>
       ${MM_STYLES[sk.style]?.book ? `<div class="mm-top mm-deco small"><b>On the map:</b>${[["title", "Title (the map name)"], ["compass", "Compass rose"], ["scale", "Scale"], ["border", "Paper border"]].map(([k, l]) => `<label><input type="checkbox" data-deco="${k}" ${(sk.deco?.[k] ?? true) ? "checked" : ""}> ${l}</label>`).join("")}
+        <label>Font <select id="mm_font">${Object.entries(MM_FONTS).map(([k, f]) => `<option value="${k}" ${(sk.deco?.font || "pirata") === k ? "selected" : ""}>${f.name}</option>`).join("")}</select></label>
         <label>Title in the <select id="mm_pos">${[["tl", "top left"], ["tr", "top right"], ["bl", "bottom left"], ["br", "bottom right"]].map(([v, l]) => `<option value="${v}" ${(sk.deco?.pos || "tl") === v ? "selected" : ""}>${l}</option>`).join("")}</select> corner</label></div>` : ""}
       <div class="mm-body"><div class="mm-tools">${tools.map(([k, i, l]) => `<button class="mmt ${st.tool === k ? "on" : ""}" data-act="mmTool" data-k="${k}" title="${l}"><span>${i}</span><small>${l.split(" (")[0]}</small></button>`).join("")}
           <button class="mmt" data-act="mmRot" title="Rotate the next icon (tap a placed icon with the same tool to turn it)"><span style="display:inline-block;transform:rotate(${st.rot * 90}deg)">➜</span><small>Rotate ${st.rot * 90}°</small></button>
           <div class="mm-sep">Icons</div>${MM_ICONS.map(([k, l]) => `<button class="mmt ico ${st.tool === "i:" + k ? "on" : ""}" data-act="mmTool" data-k="i:${k}" title="${l}"><img src="${this.iconImg(k, sk.style)}" alt=""><small>${l}</small></button>`).join("")}</div>
         <div class="mm-canvas" id="mm_wrap"><canvas id="mm_cv"></canvas></div></div>
-      <div class="mm-hint small">${st.tool === "pan" ? "Drag to look around." : st.tool.startsWith("i:") ? "Tap a square to place the icon · tap it again to turn it · ⌫ Erase removes it." : st.tool === "label" ? "Tap a square to write a room number or text · tap a label to change or delete it." : st.tool === "room" ? "Drag a rectangle to carve out a room." : st.tool === "cave" ? "Paint freely to carve out caves with natural, uneven walls (brush size at the top)." : st.tool === "wbrush" ? "Paint rivers, streams and pools — the water flows in the direction you paint." : st.tool === "erase" ? "Drag to turn floor back into rock (squares and brush shapes); tap an icon or label to remove it." : "Drag over squares to paint."}</div>`;
+      <div class="mm-hint small">${st.tool === "pan" ? "Drag to look around." : st.tool.startsWith("i:") ? "Tap a square to place the icon · tap it again to turn it · ⌫ Erase removes it." : st.tool === "label" ? "Tap a square to write a room number or text · tap a label to change or delete it." : st.tool === "room" ? "Drag a rectangle to carve out a room." : st.tool === "cave" ? "Paint freely to carve out caves with natural, uneven walls (brush size at the top)." : st.tool === "wbrush" ? "Paint rivers, streams and pools — the water flows in the direction you paint." : st.tool === "foam" ? "Paint white water: rapids, a waterfall's splash, where a river pours into a hole." : st.tool === "pit" ? "Paint a chasm, sinkhole or pit — dark in the middle, with a rocky rim." : st.tool === "erase" ? "Drag to turn floor back into rock (squares and brush shapes); tap an icon or label to remove it." : "Drag over squares to paint."}</div>`;
     this.paint();
   },
   paint(preview) {
@@ -166,7 +167,7 @@ const MM = {
   redo() { const st = this.st, r = st.redo.pop(); if (!r) return; st.undo.push(JSON.stringify(st.sk)); st.sk = JSON.parse(r); this.ui(); },
   atF(e) { const r = document.getElementById("mm_cv").getBoundingClientRect(), Mg = this.margin(this.st.sk); return { x: (e.clientX - r.left) / this.st.cs - Mg, y: (e.clientY - r.top) / this.st.cs - Mg }; },
   at(e) { const p = this.atF(e); return { x: Math.floor(p.x), y: Math.floor(p.y) }; },
-  isBrush() { const t = this.st.tool; return t === "cave" || t === "wbrush" || (t === "erase" && (this.st.sk.strokes || []).length); },
+  isBrush() { const t = this.st.tool; return ["cave", "wbrush", "foam", "pit"].includes(t) || (t === "erase" && (this.st.sk.strokes || []).length); },
   brushStart(k, p) { const s = { k, r: +this.st.brush || 1, seed: Math.floor(Math.random() * 1e6), pts: [[+p.x.toFixed(2), +p.y.toFixed(2)]] }; (this.st.sk.strokes ||= []).push(s); this.drag.stroke = s; },
   brushTo(p) { const s = this.drag.stroke; if (!s) return; const l = s.pts[s.pts.length - 1]; if (Math.hypot(p.x - l[0], p.y - l[1]) < 0.18) return; s.pts.push([+p.x.toFixed(2), +p.y.toFixed(2)]); },
   apply(p) {
@@ -183,11 +184,11 @@ const MM = {
   down(e) {
     const st = this.st; if (!st || st.tool === "pan") return;
     const p = this.at(e), pf = this.atF(e);
-    const brush = st.tool === "cave" || st.tool === "wbrush";
+    const brush = ["cave", "wbrush", "foam", "pit"].includes(st.tool);
     if (!brush && (p.x < 0 || p.y < 0 || p.x >= st.sk.cols || p.y >= st.sk.rows)) return;
     e.preventDefault(); e.target.setPointerCapture?.(e.pointerId);
     this.snap();
-    if (brush) { this.drag = { start: p, last: p }; this.brushStart(st.tool === "cave" ? "cave" : "water", pf); this.paint(); return; }
+    if (brush) { this.drag = { start: p, last: p }; this.brushStart({ cave: "cave", wbrush: "water", foam: "foam", pit: "pit" }[st.tool], pf); this.paint(); return; }
     if (st.tool.startsWith("i:")) {
       const t = st.tool.slice(2), ex = st.sk.items.find(i => i.x === p.x && i.y === p.y);
       if (ex && ex.t === t) ex.r = ((ex.r || 0) + 1) % 4; else { st.sk.items = st.sk.items.filter(i => i !== ex); let r = st.rot;
@@ -237,6 +238,7 @@ document.addEventListener("change", e => {
   if (e.target.id === "mm_style") { MM.st.sk.style = e.target.value; MM.st.sk.deco ||= { border: true, title: true, compass: true, scale: true, pos: "tl" }; MM.ui(); }
   if (e.target.id === "mm_brush") { MM.st.brush = +e.target.value; }
   if (e.target.dataset.deco) { MM.snap(); (MM.st.sk.deco ||= {})[e.target.dataset.deco] = e.target.checked; MM.ui(); }
+  if (e.target.id === "mm_font") { MM.snap(); (MM.st.sk.deco ||= {}).font = e.target.value; try { document.fonts.load(`${mmFont(MM.st.sk).w} 40px ${mmFont(MM.st.sk).css}`).then(() => MM.st && MM.paint()); } catch (x) { } MM.ui(); }
   if (e.target.id === "mm_pos") { MM.snap(); (MM.st.sk.deco ||= {}).pos = e.target.value; MM.ui(); }
   if (e.target.id === "mm_title") { MM.st.title = e.target.value; MM.paint(); }
 });
@@ -265,7 +267,7 @@ Object.assign(ACT, {
     MM.close(); render(); },
   mmSave: async () => {
     const st = MM.st; st.title = $("#mm_title")?.value || st.title;
-    try { await Promise.race([document.fonts.load(`700 40px ${MM_FONT}`), new Promise(r => setTimeout(r, 1500))]); } catch (e) { }
+    try { const F = mmFont(st.sk); await Promise.race([document.fonts.load(`${F.w} 40px ${F.css}`), new Promise(r => setTimeout(r, 1500))]); } catch (e) { }
     (st.sk.deco ||= {}).text = st.title;
     const book = MM_STYLES[st.sk.style]?.book, cs = st.target.kind === "map" ? (book ? 60 : 70) : 40, cv = MM.render(st.sk, cs, st.title), image = book ? cv.toDataURL("image/webp", 0.9) : cv.toDataURL("image/png"), thumb = mmThumb(cv);
     const Mg = MM.margin(st.sk);
