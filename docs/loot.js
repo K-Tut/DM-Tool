@@ -146,11 +146,11 @@ function lootCard(L) {
     return `<div class="lootrow">${inp(`loot.${i}.items.${k}.qty`, +e.qty || 1, { type: "number", style: "width:52px", attr: 'min="1"' })}
       ${e.ref || e.kind === "trinket" ? `<a href="#" class="grow" data-act="itemPeek" data-l="${L.id}" data-e="${e.id}">${esc(e.name)}</a>` : `<span class="grow">${esc(e.name)}</span>`}${tag}
       ${["magic", "trinket", "gem", "art"].includes(e.kind) ? `<button class="small ghost" data-act="lootReroll" data-l="${L.id}" data-e="${e.id}" title="Swap for another one">🎲</button>` : ""}
-      ${S.server ? `<button class="small ghost" data-act="itemGive" data-l="${L.id}" data-e="${e.id}" title="Give this to one player">🎁</button>` : ""}<a href="#" data-act="lootDelItem" data-l="${L.id}" data-e="${e.id}" title="Remove">✕</a></div>`; };
+      ${true ? `<button class="small ghost" data-act="itemGive" data-l="${L.id}" data-e="${e.id}" title="Give this to one player">🎁</button>` : ""}<a href="#" data-act="lootDelItem" data-l="${L.id}" data-e="${e.id}" title="Remove">✕</a></div>`; };
   return `<div class="card lootcard ${isSel ? "sel" : ""}" id="loot-${L.id}" data-act="lootSel" data-id="${L.id}">
     <div class="row">${inp(`loot.${i}.name`, L.name, { style: "flex:1;font-weight:700;min-width:120px" })}
       <label class="small">at ${sel(`loot.${i}.node`, L.node || "", nodes.map(n => [n.id, "#" + n.n + " " + (n.title || "")]), { blank: "— no node —" })}</label>
-      ${S.server ? `<button class="small" data-act="lootGive" data-id="${L.id}" title="Send this loot to the players' phones: they claim items, split the coins and press OK">🎁 Give to party</button>` : ""}<button class="small ghost" data-act="delLoot" data-id="${L.id}" title="Delete list">🗑</button></div>
+      ${true ? `<button class="small" data-act="lootGive" data-id="${L.id}" title="Send this loot to the players' phones: they claim items, split the coins and press OK">🎁 Give to party</button>` : ""}<button class="small ghost" data-act="delLoot" data-id="${L.id}" title="Delete list">🗑</button></div>
     <div class="coins">${COINS.map(c => `<label>${c.toUpperCase()} ${inp(`loot.${i}.coins.${c}`, +L.coins?.[c] || 0, { type: "number", style: "width:86px", attr: 'min="0"' })}</label>`).join("")}</div>
     <div class="lootitems">${(L.items || []).map(row).join("") || '<p class="small muted">No items yet.</p>'}</div>
     <div class="row small" style="margin-top:6px"><input placeholder="Add your own item, e.g. Silver key to the vault" data-act-enter="lootCustom" data-l="${L.id}" style="flex:1;min-width:150px"><button class="small ghost" data-act="lootCustom" data-l="${L.id}">+ Add</button>

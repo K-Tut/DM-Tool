@@ -17,14 +17,13 @@ function offerItem(e) {
   return { id: e.id, name: e.name, qty: +e.qty || 1, kind: e.kind || (it ? "magic" : "item"), rarity: e.rarity || it?.rarity || "", attune: !!it?.attune, value: +e.value || 0,
     desc, cursed, curse, img: it?.my?.img || "", weapon: it?.my?.cat === "Weapon" ? { base: it.my.base, magic: +it.my.bonus || 0, extra: myItemExtra(it.my) } : null };
 }
-async function postOffer(o) { await api("api/offer/new", { method: "POST", body: { offer: o } }); toast("Sent to the players — they see it under 🎁"); }
+async function postOffer(o) { await liveApi("api/offer/new", { offer: o }); toast("Sent to the players — they see it under 🎁"); }
 function onlinePlayers() { return (S.players || []).filter(p => p.online); }
 function playerChip(p) { return `<span class="pchip"><span class="av" style="background:${esc(p.color)}">${p.img ? `<img src="${esc(p.img)}">` : esc((p.name || "?")[0])}</span>${esc(p.name)}</span>`; }
 // status of everything handed out (Loot tab)
 function vOffers() {
-  if (!S.server) return "";
   const os = S.offers || [], pls = S.players || [], who = pid => pls.find(p => p.pid === pid) || { name: "?", color: "#888" };
-  return `<div class="card"><div class="row"><h3 style="margin:0">🎁 Players</h3><span class="small muted">${onlinePlayers().length ? onlinePlayers().map(playerChip).join(" ") : "nobody connected — players scan the QR code and enter their name"}</span><button class="small ghost right" data-act="showQR">📱 QR code</button></div>
+  return `<div class="card"><div class="row"><h3 style="margin:0">🎁 Players</h3><span class="small muted">${onlinePlayers().length ? onlinePlayers().map(playerChip).join(" ") : "nobody connected — players scan the QR code and enter their name"} ${liveStatusHtml()}</span><button class="small ghost right" data-act="showQR">📱 QR code</button></div>
     ${os.map(o => `<div class="offer"><div class="row small"><b>${o.kind === "player" ? "Item for " + esc(who(o.to).name) : "Party loot"}: ${esc(o.title)}</b>${o.done ? '<span class="chip" style="background:#2f9e44;color:#fff">✔ shared out</span>' : '<span class="chip">players are deciding…</span>'}<a href="#" class="right" data-act="offerClose" data-id="${o.id}">remove</a></div>
       ${(o.items || []).map(it => `<div class="small">• ${esc(it.name)} → ${o.claims[it.id] ? playerChip(who(o.claims[it.id])) : '<span class="muted">nobody yet</span>'}${it.identified ? ` <span class="chip">🔍 identified by ${esc(who(it.identifiedBy).name)}</span>` : ""}</div>`).join("")}
       ${o.shares ? `<div class="small">Coins split: ${Object.entries(o.shares).map(([p, c]) => esc(who(p).name) + " " + Object.entries(c).filter(([, v]) => v).map(([k, v]) => v + " " + k).join(" ")).join(" · ")}</div>` : ""}
@@ -44,5 +43,5 @@ Object.assign(ACT, {
   itemGive: (el, e) => { e.stopPropagation(); S.modal = { type: "give", l: el.dataset.l, e: el.dataset.e }; renderModal(); },
   giveTo: async el => { const L = findLoot(S.modal.l), e = L.items.find(x => x.id === S.modal.e); S.modal = null; renderModal();
     await postOffer({ id: uid(), kind: "player", to: el.dataset.p, title: e.name, items: [offerItem(e)], coins: {} }); },
-  offerClose: async el => { await api("api/offer/act", { method: "POST", body: { oid: el.dataset.id, act: "close" } }); }
+  offerClose: async el => { await liveApi("api/offer/act", { oid: el.dataset.id, act: "close" }); }
 });

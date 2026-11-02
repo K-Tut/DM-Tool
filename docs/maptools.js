@@ -3,7 +3,7 @@
 function tokMonster(t) { return t.mon ? S.scen?.monsters.find(m => m.id === t.mon) : null; }
 function tokImg(t) { const sm = tokMonster(t); return sm ? (sm.custom?.image || monImgSrc(sm)) : (t.img || ""); }
 // what the players' screens get: monster pictures as a small link the laptop serves (not the big picture itself)
-function tokForTable(t) { const sm = tokMonster(t), ref = sm ? monImgRef(sm) : ""; return ref && !sm.custom?.image ? { ...t, ref } : t; }
+function tokForTable(t) { const sm = tokMonster(t); if (!sm) return t; const ref = sm.custom?.image ? "c:" + sm.id : monImgRef(sm); return ref ? { ...t, ref } : t; }
 function trashHtml() { return `<div class="maptrash" title="Drag a token or a template here to remove it">🗑</div>`; }
 function toolMap(k) { return k === "bm" ? curMap() : cbMap(); }
 function mapTools(k) {

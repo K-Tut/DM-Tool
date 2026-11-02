@@ -428,7 +428,7 @@ function vMaps() {
         <span class="small">HP <button class="small ghost" data-act="tokHp" data-id="${t.id}" data-d="-1">−</button><input type="number" data-path="battlemaps.${i}.tokens.${k}.hp" data-num value="${t.hp ?? ""}" style="width:52px">/${t.maxHp ?? "?"}<button class="small ghost" data-act="tokHp" data-id="${t.id}" data-d="1">+</button></span>` : ""}
       <a href="#" class="right" data-act="tokDel" data-id="${t.id}">✕</a></div>`; };
   return `<div class="row" style="margin-bottom:8px"><button class="ghost" data-act="closeMap">← All battlemaps</button>${inp(`battlemaps.${i}.name`, m.name, { style: "font-weight:700;flex:1" })}${m.sketch ? `<button class="ghost" data-act="editDrawing" data-k="map" data-id="${m.id}">✏ Edit drawing</button>` : ""}
-      ${!S.server ? `<span class="small muted" title="Sharing the map with players needs the DM Tool running on the laptop">📡 share: laptop only</span>` : live ? `<span><span class="livedot"></span><b>Live</b></span><button data-act="showQR">📱 QR code</button><button class="ghost" data-act="stopShare">■ Stop sharing</button>` : `<button data-act="share">📡 Share with players</button>`}</div>
+      ${live ? `<span><span class="livedot"></span><b>Live</b></span><button data-act="showQR">📱 QR code</button><button class="ghost" data-act="stopShare">■ Stop sharing</button>` : `<button data-act="share">📡 Share with players</button>`}</div>
     <div class="mapedit"><div><div class="row small" style="margin-bottom:6px"><button class="ghost small" data-act="bmZoom" data-d="0.8">−</button><button class="ghost small" data-act="bmZoom" data-d="fit">Fit</button><button class="ghost small" data-act="bmZoom" data-d="1.25">+</button>
         <span class="muted">Drag tokens to move them (they snap to the grid).</span></div>${mapTools("bm")}<div class="maphost">${trashHtml()}<div id="bmmap" class="mapbox" data-sk="bm"></div></div></div>
       <div><div class="card"><h3>Grid</h3>
@@ -456,12 +456,11 @@ function drawBattlemap() {
 
 // live sharing (DM side)
 async function pushTable(full) {
-  if (!S.server) return;
   const m = curMap() || (S.live && S.scen.battlemaps.find(b => b.id === S.live.mapId)); if (!m || !S.live) return;
   if (S.live.mapId !== m.id) return;
   const body = { name: m.name, grid: m.grid, tokens: m.tokens.map(tokForTable), templates: m.templates || [] };
   if (full) Object.assign(body, { image: m.image, w: m.w, h: m.h, scenarioId: S.scen.id, mapId: m.id });
-  await api(full ? "api/table/host" : "api/table/update", { method: "POST", body });
+  await liveApi(full ? "api/table/host" : "api/table/update", body);
 }
 async function dmPoll() {
   let rev = -1;
@@ -469,18 +468,7 @@ async function dmPoll() {
     try {
       const s = await api(`api/table?dm=1&rev=${rev}&img=skip`);
       rev = s.rev;
-      const sig = JSON.stringify([s.players, s.offers]);
-      if (sig !== S.shareSig) { S.shareSig = sig; S.players = s.players || []; S.offers = s.offers || [];
-        if (S.view === "scen" && S.tab === "loot" && !document.querySelector("input:focus, textarea:focus, select:focus") && !S.modal) render(); }
-      if (s.active && S.scen && s.scenarioId === S.scen.id) {
-        S.live = { mapId: s.mapId };
-        const m = S.scen.battlemaps.find(b => b.id === s.mapId);
-        if (m && !S.ui.dragging) {
-          let changed = false;
-          for (const t of s.tokens) { const mine = m.tokens.find(k => k.id === t.id); if (mine && (mine.x !== t.x || mine.y !== t.y)) { mine.x = t.x; mine.y = t.y; changed = true; } }
-          if (changed) { save(); if (S.mapId === m.id) drawBattlemap(); }
-        }
-      } else if (!s.active) S.live = null;
+      if (liveMode() === "lan") onLiveState(s);
     } catch (e) { await new Promise(r => setTimeout(r, 2000)); }
   }
 }
@@ -755,14 +743,24 @@ function vNotes() {
 }
 // ----- modals -----
 function mQR() {
+  const mode = liveMode();
+  const tabs = S.server ? `<div class="row" style="margin-bottom:8px"><button class="small ${mode === "online" ? "" : "ghost"}" data-act="liveModeSet" data-m="online">🌐 Online (needs internet)</button><button class="small ${mode === "lan" ? "" : "ghost"}" data-act="liveModeSet" data-m="lan">📶 Local network (laptop, no internet)</button></div>` : "";
+  if (mode === "online") {
+    const url = Host.id ? tableUrl() + "#peer=" + Host.id : "";
+    return `<h2>📱 Players: scan to join</h2>${tabs}
+      ${Host.status === "ready" && url ? `<div class="qrbox">${QR.svg(url, 300)}<p class="small" style="word-break:break-all">${esc(url)}</p></div>${liveStatusHtml()}`
+        : Host.status === "error" ? `<p class="warn">${esc(Host.error)}</p><button class="small" data-act="showQR">Try again</button>` : `<p>Opening the online table… ${liveStatusHtml()}</p>`}
+      <p class="small muted">The players' phones connect to <b>this page</b> over the internet — no firewall settings or admin rights needed. Everyone needs internet (a phone hotspot is fine). <b>Keep this DM Tool page open</b> while you play: it is the meeting point.</p>
+      <div class="foot"><button data-act="closeModal">Done</button></div>`;
+  }
   const ips = S.net?.ips || [], port = S.net?.port || location.port || 8766;
   const ip = S.ui.qrIp && ips.includes(S.ui.qrIp) ? S.ui.qrIp : ips[0];
   const url = ip ? `http://${ip}:${port}/table` : "";
-  return `<h2>📱 Players: scan to join</h2>
+  return `<h2>📱 Players: scan to join</h2>${tabs}
     ${url ? `<div class="qrbox">${QR.svg(url, 300)}<p style="font-size:18px;font-weight:700;word-break:break-all">${esc(url)}</p></div>
       ${ips.length > 1 ? `<p class="small">Network: <select data-act="qrIp">${ips.map(i => `<option ${i === ip ? "selected" : ""}>${i}</option>`).join("")}</select> <span class="muted">(pick the one of the Wi-Fi/hotspot your players are on — the hotspot is usually 192.168.137.1)</span></p>` : ""}`
       : `<p class="warn">No network found. Connect the laptop to a Wi-Fi or turn on its mobile hotspot, then reopen this window.</p>`}
-    <p class="small muted">Players must be on the same Wi-Fi or on your laptop's hotspot. No internet is needed. If their phone can't connect, allow Python through the Windows firewall for <b>private networks</b>.</p>
+    <p class="small muted">Players must be on the same Wi-Fi or on your laptop's hotspot. No internet is needed, but the laptop's firewall must let them in (allow-phones.bat, needs admin rights). Without admin rights use 🌐 Online.</p>
     <div class="foot"><button data-act="closeModal">Done</button></div>`;
 }
 function mCustom() {
@@ -885,9 +883,10 @@ Object.assign(ACT, {
   tokDel: el => { const m = curMap(); m.tokens = m.tokens.filter(t => t.id !== el.dataset.id); save(); render(); pushTable(); },
   tokHide: el => { const t = curMap().tokens.find(x => x.id === el.dataset.id); t.hidden = !t.hidden; save(); render(); pushTable(); },
   tokHp: el => { const t = curMap().tokens.find(x => x.id === el.dataset.id); t.hp = Math.max(0, (t.hp ?? t.maxHp ?? 0) + +el.dataset.d); save(); render(); },
-  share: async () => { const m = curMap(); S.live = { mapId: m.id }; await pushTable(true); S.net = await api("api/net"); S.modal = { type: "qr" }; render(); },
-  showQR: async () => { S.net = await api("api/net"); S.modal = { type: "qr" }; renderModal(); },
-  stopShare: async () => { await api("api/table/stop", { method: "POST" }); S.live = null; render(); },
+  share: async () => { const m = curMap(); S.live = { mapId: m.id }; S.modal = { type: "qr" }; render(); if (S.server) S.net = await api("api/net"); await pushTable(true); renderModal(); },
+  showQR: async () => { S.modal = { type: "qr" }; renderModal(); if (S.server) S.net = await api("api/net").catch(() => null); if (liveMode() === "online") Host.ensure().catch(() => { }); renderModal(); },
+  stopShare: async () => { await liveApi("api/table/stop", {}); S.live = null; render(); },
+  liveModeSet: async el => { try { localStorage.setItem("dmLiveMode", el.dataset.m); } catch (e) { } if (S.live) await pushTable(true); if (el.dataset.m === "online") Host.ensure().catch(() => { }); renderModal(); render(); },
   closeModal: () => { S.modal = null; renderModal(); },
   // monsters
   openMon: el => { S.ui.openMon = S.ui.openMon === el.dataset.id ? null : el.dataset.id; render(); },
@@ -955,11 +954,11 @@ function bindBattlemap() {
   MapView.bind(proxy, () => ({ map: curMap(), z: S.ui.bmZ }), (id, x, y) => {
     const m = curMap(); const t = m.tokens.find(k => k.id === id); if (t) { t.x = x; t.y = y; }
     save(); drawBattlemap();
-    if (S.live && S.live.mapId === m.id) api("api/table/move", { method: "POST", body: { id, x, y } });
+    if (S.live && S.live.mapId === m.id) liveApi("api/table/move", { id, x, y });
   }, id => { S.ui.selTok = S.ui.selTok === id ? null : id; render(); }, mapExtras(() => curMap(), () => drawBattlemap()));
 }
 
-const APP_VERSION = "2026-11-02c";
+const APP_VERSION = "2026-11-02d";
 async function init() {
   try { const t = localStorage.getItem("dmtheme"); if (t) document.documentElement.dataset.theme = t; } catch (e) { }
   await Sync.init();

@@ -197,7 +197,7 @@ function bindCbMap() {
   proxy.querySelector = s => { const h = document.getElementById("cbmap"); return h ? h.querySelector(s) : null; };
   MapView.bind(proxy, () => ({ map: cbMap(), z: S.ui.cbZ }), (id, x, y) => {
     const m = cbMap(), t = m && m.tokens.find(k => k.id === id); if (t) { t.x = x; t.y = y; }
-    save(); drawCbMap(); if (S.live && S.live.mapId === m.id) api("api/table/move", { method: "POST", body: { id, x, y } });
+    save(); drawCbMap(); if (S.live && S.live.mapId === m.id) liveApi("api/table/move", { id, x, y });
   }, id => { const m = cbMap(), t = m && m.tokens.find(k => k.id === id); S.ui.cbPop = t && t.cf ? (S.ui.cbPop === t.cf ? null : t.cf) : null; render(); }, mapExtras(() => cbMap(), () => drawCbMap()));
 }
 Object.assign(ACT, {

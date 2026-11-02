@@ -1,6 +1,9 @@
 "use strict";
 /* Player view: the shared battlemap (live, everyone can move tokens) and the loot / items the DM hands out. */
-const T = { map: null, rev: -1, imageRev: "", z: null, fitMode: true, dragging: false, players: [], offers: [], open: {}, seenOffers: null };
+const T = { map: null, rev: -1, imageRev: "", z: null, fitMode: true, dragging: false, players: [], offers: [], open: {}, seenOffers: null, imgs: {} };
+// online table: the QR code opens …/table.html#peer=<the DM's id> and we connect to the DM Tool over the internet
+const PEER = (location.hash.match(/peer=([\w-]+)/) || [])[1] || "";
+let CONN = null;
 const board = document.getElementById("board"), status = document.getElementById("status");
 const RAR_COL = { common: "#6b6b6b", uncommon: "#2f7d4a", rare: "#1f4e8e", "very rare": "#6b2f8e", legendary: "#b8641a", artifact: "#8e1f1f" };
 let ME = null; try { ME = JSON.parse(localStorage.getItem("tablePlayer") || "null"); } catch (e) { }
@@ -9,32 +12,59 @@ function draw() {
   if (!T.map || !T.map.active) { board.innerHTML = `<div id="wait">${T.map && !T.map.active ? "The DM is not sharing a map right now." : "Waiting for the DM to share a map…"}<br><small style="opacity:.7">Loot and items from the DM appear under 🎁</small></div>`; return; }
   if (T.fitMode || T.z == null) T.z = MapView.fitZoom(board, T.map);
   const sl = board.scrollLeft, st = board.scrollTop;
-  board.innerHTML = MapView.html(T.map, T.z, { dm: false, img: t => t.ref ? "/api/mimg?k=" + encodeURIComponent(t.ref) : "" });
+  board.innerHTML = MapView.html(T.map, T.z, { dm: false, img: t => !t.ref ? "" : PEER ? (T.imgs[t.ref] || "") : "/api/mimg?k=" + encodeURIComponent(t.ref) });
   board.scrollLeft = sl; board.scrollTop = st;
   document.getElementById("tname").textContent = T.map.name || "Battlemap";
 }
 
+function applyState(s) {
+  const image = s.image !== undefined ? s.image : (T.map ? T.map.image : "");
+  if (s.image !== undefined) T.imageRev = s.imageRev;
+  if (s.imgs) T.imgs = s.imgs;
+  T.rev = s.rev;
+  const changedMap = !T.map || T.map.mapId !== s.mapId;
+  T.map = { ...s, image };
+  T.players = s.players || []; T.offers = s.offers || [];
+  if (changedMap) T.fitMode = true;
+  status.textContent = s.active ? "● live" : "○ connected"; status.style.color = s.active ? "#7d7" : "#ccc";
+  if (!T.dragging) draw();
+  lootUpdate();
+}
 async function poll() {
+  if (PEER) return connectOnline();
   for (;;) {
     try {
       const r = await fetch(`/api/table?rev=${T.rev}&img=${T.imageRev}&pid=${ME ? ME.pid : ""}`, { cache: "no-store" });
-      const s = await r.json();
-      const image = s.image !== undefined ? s.image : (T.map ? T.map.image : "");
-      if (s.image !== undefined) T.imageRev = s.imageRev;
-      T.rev = s.rev;
-      const changedMap = !T.map || T.map.mapId !== s.mapId;
-      T.map = { ...s, image };
-      T.players = s.players || []; T.offers = s.offers || [];
-      if (changedMap) T.fitMode = true;
-      status.textContent = s.active ? "● live" : "○ connected"; status.style.color = s.active ? "#7d7" : "#ccc";
-      if (!T.dragging) draw();
-      lootUpdate();
+      applyState(await r.json());
     } catch (e) {
       status.textContent = "reconnecting…"; status.style.color = "#fb6";
       await new Promise(res => setTimeout(res, 1500));
     }
   }
 }
+// ---------- online table (PeerJS / WebRTC) ----------
+function loadPeerJs() { return window.Peer ? Promise.resolve() : new Promise((res, rej) => { const s = document.createElement("script"); s.src = "https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"; s.onload = res; s.onerror = rej; document.head.appendChild(s); }); }
+let peer = null, retryT = null;
+function retry(msg) { status.textContent = msg || "reconnecting…"; status.style.color = "#fb6"; clearTimeout(retryT); retryT = setTimeout(connectOnline, 3000); }
+async function connectOnline() {
+  status.textContent = "connecting…"; status.style.color = "#ccc";
+  try { await loadPeerJs(); } catch (e) { return retry("no internet?"); }
+  if (!peer || peer.destroyed) {
+    peer = new Peer({ debug: 1, ...(window.PEER_OPTS || {}) });
+    peer.on("error", e => { if (e.type === "peer-unavailable") retry("DM not online — is the DM Tool open?"); else retry(); });
+    peer.on("disconnected", () => { try { peer.reconnect(); } catch (e) { } });
+    await new Promise(res => { if (peer.open) res(); else peer.on("open", res); setTimeout(res, 8000); });
+  }
+  try { CONN && CONN.close(); } catch (e) { }
+  const c = CONN = peer.connect(PEER, { reliable: true });
+  c.on("open", () => { status.textContent = "○ connected"; status.style.color = "#ccc"; if (ME) c.send({ t: "join", p: ME }); c.send({ t: "hello" }); });
+  c.on("data", m => { if (m && m.t === "state") { T.lastMsg = Date.now(); applyState(m.s); } });
+  c.on("close", () => { if (CONN === c) retry(); });
+  c.on("error", () => { if (CONN === c) retry(); });
+}
+// the DM sends something at least every 15 s; if nothing comes for 40 s, reconnect (DM page reloaded, network hiccup…)
+setInterval(() => { if (PEER && T.lastMsg && Date.now() - T.lastMsg > 40000) { T.lastMsg = Date.now(); retry("reconnecting…"); } }, 5000);
+function sendOnline(m) { try { if (CONN && CONN.open) { CONN.send(m); return true; } } catch (e) { } return false; }
 
 // ---------- who am I ----------
 const COLORS = ["#c92a2a", "#1971c2", "#2f9e44", "#9c36b5", "#e8590c", "#0c8599", "#5c940d", "#495057"];
@@ -63,7 +93,7 @@ function showJoin() {
     await join(); w.classList.add("hidden"); meBtn(); lootUpdate();
   };
 }
-async function join() { if (!ME) return; try { await fetch("/api/player/join", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ME) }); } catch (e) { } }
+async function join() { if (!ME) return; if (PEER) return sendOnline({ t: "join", p: ME }); try { await fetch("/api/player/join", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ME) }); } catch (e) { } }
 
 // ---------- loot window ----------
 const mine = o => o.kind === "player" ? ME && o.to === ME.pid : true;
@@ -98,7 +128,7 @@ function drawLoot() {
         ${o.done && !myItems.length && !coinsText(share) ? `<small>Nothing for you this time.</small>` : ""}</div></div>`;
   }).join("") : `<div class="lw"><p>No loot or items from the DM right now.</p></div>`) + `<div style="text-align:center"><button class="ghost" style="color:#fff" data-x="close">Close</button></div>`;
 }
-async function act(o, a, item) { try { await fetch("/api/offer/act", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ oid: o, pid: ME.pid, act: a, item }) }); } catch (e) { } }
+async function act(o, a, item) { if (PEER) return sendOnline({ t: "act", oid: o, pid: ME.pid, act: a, item }); try { await fetch("/api/offer/act", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ oid: o, pid: ME.pid, act: a, item }) }); } catch (e) { } }
 async function gz64(obj) {
   const buf = await new Response(new Blob([JSON.stringify(obj)]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer();
   const b = new Uint8Array(buf); let s = ""; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
@@ -122,6 +152,7 @@ document.getElementById("mebtn").onclick = showJoin;
 
 MapView.bind(board, () => ({ map: T.map, z: T.z }), async (id, x, y) => {
   const t = T.map.tokens.find(k => k.id === id); if (t) { t.x = x; t.y = y; } draw();
+  if (PEER) return sendOnline({ t: "move", id, x, y });
   try { await fetch("/api/table/move", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, x, y }) }); } catch (e) { }
 }, null);
 board.addEventListener("pointerdown", e => { if (e.target.closest(".tok")) T.dragging = true; });
