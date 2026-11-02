@@ -176,6 +176,7 @@ function renderInner() {
   renderModal();
   if (typeof Dice !== "undefined") Dice.sync();
   if (typeof drawPanel === "function") drawPanel();
+  if (typeof drawPartyBar === "function") drawPartyBar();
   afterRender();
 }
 function renderModal() {
@@ -746,9 +747,10 @@ function mQR() {
   const mode = liveMode();
   const tabs = S.server ? `<div class="row" style="margin-bottom:8px"><button class="small ${mode === "online" ? "" : "ghost"}" data-act="liveModeSet" data-m="online">🌐 Online (needs internet)</button><button class="small ${mode === "lan" ? "" : "ghost"}" data-act="liveModeSet" data-m="lan">📶 Local network (laptop, no internet)</button></div>` : "";
   if (mode === "online") {
-    const url = Host.id ? tableUrl() + "#peer=" + Host.id : "";
+    const url = Host.id ? (window.BUILDER_URL || "https://k-tut.github.io/Character-Builder/") + "#join=" + Host.id : "", alt = Host.id ? tableUrl() + "#peer=" + Host.id : "";
     return `<h2>📱 Players: scan to join</h2>${tabs}
-      ${Host.status === "ready" && url ? `<div class="qrbox">${QR.svg(url, 300)}<p class="small" style="word-break:break-all">${esc(url)}</p></div>${liveStatusHtml()}`
+      ${Host.status === "ready" && url ? `<div class="qrbox">${QR.svg(url, 300)}<p class="small" style="word-break:break-all">${esc(url)}</p></div>${liveStatusHtml()}
+        <p class="small">The code opens the <b>Character Builder</b>: players pick their character and join. No characters on that phone? They can use the <a href="${esc(alt)}" target="_blank">simple browser page</a> instead (send them this link).</p>`
         : Host.status === "error" ? `<p class="warn">${esc(Host.error)}</p><button class="small" data-act="showQR">Try again</button>` : `<p>Opening the online table… ${liveStatusHtml()}</p>`}
       <p class="small muted">The players' phones connect to <b>this page</b> over the internet — no firewall settings or admin rights needed. Everyone needs internet (a phone hotspot is fine). <b>Keep this DM Tool page open</b> while you play: it is the meeting point.</p>
       <div class="foot"><button data-act="closeModal">Done</button></div>`;
@@ -958,7 +960,7 @@ function bindBattlemap() {
   }, id => { S.ui.selTok = S.ui.selTok === id ? null : id; render(); }, mapExtras(() => curMap(), () => drawBattlemap()));
 }
 
-const APP_VERSION = "2026-11-02d";
+const APP_VERSION = "2026-11-02e";
 async function init() {
   try { const t = localStorage.getItem("dmtheme"); if (t) document.documentElement.dataset.theme = t; } catch (e) { }
   await Sync.init();

@@ -231,7 +231,7 @@ const Dice = {
         <label class="small">Mod <input type="number" id="traymod" value="${T.mod || 0}" style="width:56px" data-act-input="trayMod"></label></div>
       <div class="row" style="margin-top:6px"><button data-act="trayRoll" ${pool.length ? "" : "disabled"} style="flex:1">Roll</button><button class="ghost" data-act="trayClear">Clear</button></div>
       <div class="row small" style="margin-top:8px">Dice color: ${DICE_COLORS.map(col => `<span class="swatch ${col === this.color ? "on" : ""}" style="background:${col}" data-act="diceColor" data-c="${col}"></span>`).join("")}<input type="color" value="${this.color}" data-act="diceColorPick" title="Custom color"></div>
-      ${this.history.length ? `<div class="trayhist">${this.history.map(h => `<div><span class="muted small">${h.t}</span> ${esc(h.title)}: <b class="${h.crit ? "good" : h.fumble ? "warn" : ""}">${h.total}</b>${h.split && h.split.length > 1 ? ` <span class="small">(${h.split.map(p => p.v + (p.type ? " " + dtIcon(p.type, "inl") : "")).join(" + ")})</span>` : h.split && h.split[0]?.type ? " " + dtIcon(h.split[0].type, "inl") : ""} <span class="small muted">(${h.breakdown})</span></div>`).join("")}</div>` : ""}`;
+      ${this.history.length ? `<div class="trayhist">${this.history.map(h => h.who ? `<div class="phist" style="--c:${esc(h.color || "#888")}"><span class="muted small">${h.t}</span> <b class="pwho">${esc(h.who)}</b>: <b class="${h.crit ? "good" : h.fumble ? "warn" : ""}" style="font-size:15px">${h.total}</b> ${esc(h.title)} <span class="small muted">→ ${esc(h.detail)}${h.note ? ` (${esc(h.note)})` : ""}</span>${h.split && h.split.length > 1 ? ` <span class="small">(${h.split.map(p => p.v + (p.type ? " " + dtIcon(p.type, "inl") : "")).join(" + ")})</span>` : h.split && h.split[0]?.type ? " " + dtIcon(h.split[0].type, "inl") : ""}</div>` : `<div><span class="muted small">${h.t}</span> ${esc(h.title)}: <b class="${h.crit ? "good" : h.fumble ? "warn" : ""}">${h.total}</b>${h.split && h.split.length > 1 ? ` <span class="small">(${h.split.map(p => p.v + (p.type ? " " + dtIcon(p.type, "inl") : "")).join(" + ")})</span>` : h.split && h.split[0]?.type ? " " + dtIcon(h.split[0].type, "inl") : ""} <span class="small muted">(${h.breakdown})</span></div>`).join("")}</div>` : ""}`;
   }
 };
 
@@ -268,7 +268,7 @@ Object.assign(ACT, {
   diceNext: () => { const n = Dice.next, crit = (Dice.history[0] || {}).crit; Dice.next = null; if (!n) return;
     document.getElementById("diceres").classList.add("hidden"); Dice.ask({ ...n, kind: "dmg", crit: !!crit }); },
   diceRider: el => { const i = +el.dataset.i; Dice.cur.bonus = +(document.getElementById("dxb")?.value || 0); Dice.addRider(i, document.getElementById("rsl" + i)?.value); Dice.renderAsk(); },
-  trayToggle: () => { Dice.tray.open = !Dice.tray.open; Dice.sync(); },
+  trayToggle: () => { Dice.tray.open = !Dice.tray.open; document.getElementById("dicefab")?.classList.remove("ping"); Dice.sync(); },
   trayAdd: el => { const s = +el.dataset.s; Dice.tray.pool[s] = (Dice.tray.pool[s] || 0) + 1; Dice.renderTray(); },
   trayClear: () => { Dice.tray.pool = {}; Dice.tray.mod = 0; Dice.renderTray(); },
   trayRoll: () => { const g = Object.entries(Dice.tray.pool).filter(([s, n]) => n > 0).map(([s, n]) => ({ n, s: +s, sign: 1 }));

@@ -14,7 +14,7 @@ function loadPeerJs() {
 async function liveApi(path, body) { if (liveMode() === "lan") return api(path, { method: "POST", body }); await Host.ensure().catch(() => { }); return Host.apply(path, body || {}); }
 
 const Host = {
-  peer: null, id: null, status: "off", error: "", conns: new Set(),
+  peer: null, id: null, status: "off", error: "", conns: new Set(), sheets: {},
   H: { table: { active: false, rev: 0, imageRev: 0, image: "", name: "", grid: {}, tokens: [], templates: [], scenarioId: "", mapId: "", w: 0, h: 0 }, players: {}, offers: [], imgs: {}, imgRev: 0 },
   restore() { try { const o = JSON.parse(localStorage.getItem("dmLiveHost") || "null"); if (o) { this.H.players = o.players || {}; this.H.offers = o.offers || []; } } catch (e) { } },
   persist() { clearTimeout(this._pt); this._pt = setTimeout(() => { try { localStorage.setItem("dmLiveHost", JSON.stringify({ players: this.H.players, offers: this.H.offers.filter(o => !o.closed) })); } catch (e) { } }, 400); },
@@ -59,8 +59,10 @@ const Host = {
   msg(c, m) {
     if (!m || typeof m !== "object") return;
     if (m.t === "hello") return this.send(c);
-    if (m.t === "join" && m.p && m.p.pid) { const p = m.p; c.pid = p.pid; this.H.players[p.pid] = { pid: String(p.pid).slice(0, 40), name: String(p.name || "Player").slice(0, 40), color: String(p.color || "#2f7d4a").slice(0, 10), img: String(p.img || "").slice(0, 20000) }; return this.bump(); }
+    if (m.t === "join" && m.p && m.p.pid) { const p = m.p; c.pid = p.pid; this.H.players[p.pid] = { pid: String(p.pid).slice(0, 40), name: String(p.name || "Player").slice(0, 40), color: String(p.color || "#2f7d4a").slice(0, 10), img: String(p.img || "").slice(0, 20000), app: !!p.charId }; toastOnce("join" + p.pid, `🙂 ${p.name} joined the table`); return this.bump(); }
     if (m.t === "move") return this.apply("api/table/move", m);
+    if (m.t === "sheet" && c.pid && m.sheet) { this.sheets[c.pid] = m.sheet; const p = this.H.players[c.pid]; if (p && m.sheet.name) { p.name = String(m.sheet.name).slice(0, 40); if (m.sheet.thumb) p.img = String(m.sheet.thumb).slice(0, 20000); } pcSheetUpdate(c.pid); return this.bump(); }
+    if (m.t === "roll" && c.pid && m.r) return playerRoll(this.H.players[c.pid] || { name: "Player", color: "#888" }, m.r);
     if (m.t === "act") { if (c.pid) m.pid = c.pid; return this.apply("api/offer/act", m); }
   },
   // the same rules as dm.py
@@ -106,7 +108,7 @@ function imgForPlayers(ref) {
 // what changed at the table (players joined, loot claimed, tokens moved by players) -> DM screen
 function onLiveState(s) {
   const sig = JSON.stringify([s.players, s.offers]);
-  if (sig !== S.shareSig) { S.shareSig = sig; S.players = s.players || []; S.offers = s.offers || [];
+  if (sig !== S.shareSig) { S.shareSig = sig; S.players = s.players || []; S.offers = s.offers || []; drawPartyBar();
     if (S.view === "scen" && S.tab === "loot" && !document.querySelector("input:focus, textarea:focus, select:focus") && !S.modal) render(); }
   refreshLiveUi();
   if (s.active && S.scen && s.scenarioId === S.scen.id) {
@@ -130,3 +132,29 @@ function liveStatusHtml() {
 // keep the players' phones in touch (they reconnect when nothing arrives for a while), and reopen the table after a reload
 setInterval(() => { if (Host.peer && Host.status === "ready") for (const c of Host.conns) Host.send(c); }, 15000);
 window.addEventListener("load", () => setTimeout(() => { let used = false; try { used = !!localStorage.getItem("dmPeerId"); } catch (e) { } if (used && liveMode() === "online") Host.ensure().catch(() => { }); }, 1500));
+
+// ---------- the players at the table: round pictures on every page (bottom left), click = their character sheet ----------
+const _toasted = {}; function toastOnce(k, msg) { if (_toasted[k] && Date.now() - _toasted[k] < 60000) return; _toasted[k] = Date.now(); toast(msg); }
+function drawPartyBar() {
+  let el = document.getElementById("partybar"); if (!el) { el = document.createElement("div"); el.id = "partybar"; document.body.appendChild(el); }
+  const ps = (S.players || []).filter(p => p.online);
+  el.innerHTML = ps.map(p => `<button class="pbtn" data-act="pcSheet" data-p="${esc(p.pid)}" title="${esc(p.name)} — ${p.app ? "show the character sheet" : "joined in the browser"}" style="--c:${esc(p.color)}">${p.img ? `<img src="${esc(p.img)}" alt="">` : esc((p.name || "?")[0])}<small>${esc(p.name)}</small></button>`).join("");
+}
+MODALS.pcsheet = () => {
+  const p = (S.players || []).find(x => x.pid === S.modal.pid) || {}, has = !!Host.sheets[S.modal.pid];
+  return `<div class="row"><h2 style="margin:0;flex:1">${esc(p.name || "Player")}</h2><button data-act="closeModal">Close</button></div>
+    ${has ? `<iframe id="pcframe" src="${esc(window.BUILDER_URL || "https://k-tut.github.io/Character-Builder/")}?viewer=1" class="pcframe"></iframe><p class="small muted" style="margin:4px 0 0">Live view of the player's sheet (read only). Rolls you make here are just for you.</p>`
+      : '<p class="muted">This player joined with the browser page, not with the Character Builder — there is no sheet to show.</p>'}`;
+};
+function pcSheetUpdate(pid) { if (S.modal?.type === "pcsheet" && S.modal.pid === pid) { const f = document.getElementById("pcframe"); try { f && f.contentWindow.postMessage({ type: "dm-view-char", char: Host.sheets[pid] }, "*"); } catch (e) { } } }
+window.addEventListener("message", e => { if (e.data && e.data.type === "dm-viewer-ready" && S.modal?.type === "pcsheet") pcSheetUpdate(S.modal.pid); });
+ACT.pcSheet = el => { S.modal = { type: "pcsheet", pid: el.dataset.p }; renderModal(); };
+// ---------- their rolls show up in the dice log ----------
+function playerRoll(p, r) {
+  const h = { who: p.name, color: p.color, title: String(r.title || "Roll").slice(0, 80), total: +r.total || 0, detail: String(r.detail || "").slice(0, 120), note: String(r.note || "").slice(0, 80), crit: !!r.crit, fumble: !!r.fumble,
+    split: Array.isArray(r.split) ? r.split.slice(0, 8).map(x => ({ type: dtKey(x.type), v: +x.v || 0 })) : null, t: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
+  Dice.history.unshift(h); Dice.history = Dice.history.slice(0, 40);
+  if (Dice.tray.open) Dice.renderTray();
+  toast(`🎲 ${h.who}: ${h.total}${h.crit ? " (natural 20!)" : h.fumble ? " (natural 1)" : ""} — ${h.title.replace(/ \((Advantage|Disadvantage|Critical)\)$/, "")}`);
+  const fab = document.getElementById("dicefab"); if (fab && !Dice.tray.open) fab.classList.add("ping");
+}
